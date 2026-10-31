@@ -109,15 +109,15 @@ Before an endpoint serves its first call, the transport checks `eth_chainId` aga
 
 ### Production
 
-Pass explicit endpoints you trust. The shipped registry currently rests on a single probe run, so every row in it is on the new-node cap. It is a reasonable default for scripts, not for a service.
+Use explicit, trusted endpoints in services and create the transport once per process or Worker isolate.
 
 ```ts
 import { hyperevm } from "@bloxwap/hyperevm";
 
 const transport = hyperevm({
   endpoints: [
-    { url: env.HYPERPC_URL, label: "hyperpc" }, // https://...?apikey=...
-    { url: env.DRPC_URL, label: "drpc" }, // key in the path
+    { url: env.HYPERPC_URL, label: "hyperpc" },
+    { url: env.DRPC_URL, label: "drpc" },
     "https://rpc.hyperliquid.xyz/evm",
   ],
   timeout: 3_500,
@@ -125,19 +125,14 @@ const transport = hyperevm({
 });
 ```
 
-- **Keys in URLs work at runtime.** An explicit endpoint may carry a key in its query, its path, or `user:pass@`. Events, `snapshot()`, `value.endpoints`, and thrown errors only show the `label`, or `scheme://host[:port]` when there is none. Do not commit those URLs. The registry still rejects them.
-- **Build the transport once.** One `hyperevm()` factory shares a single instance (scores, breaker, probe timer) across every client built with the same timeout, retry count, and chain. Building it does no I/O and starts no timer. The head probe timer starts on the first request and stops after 60 seconds without one (`headLag.probeIdleTimeout`).
-- **Cloudflare Workers.** Create the transport in module scope so each isolate builds it once, and create clients per request. Set `headLag: { probeInterval: false }` so nothing runs outside a request. Heads then come only from the `eth_blockNumber` and `latest` block reads your own calls make.
-- **UI reads.** A per-attempt `timeout` of 3 to 4 seconds with `hedge: true` keeps a stalled node from holding a page. `options.timeout` wins over the client's `timeout`.
-- **Rate limits.** Give an endpoint `{ url, rps, burst }`, or every endpoint `budget: { rps }`, and the transport stays under the provider's limit instead of finding it with a 429. Probes, chain checks, races, and hedges spend tokens too. The official endpoint allows about 1.5 requests a second per IP.
-- **Browsers.** Head probes pause while the tab is hidden (`isActive`). `persist: localStoragePersistence("hyperevm:scores")` warm-starts scores from the last session. Identical concurrent reads share one request (`coalesce`, on by default). Each read races the two best endpoints (`race`), `"latest"` is pinned to a block every endpoint holds (`pinLatest`), and reads are answered from memory at most a block behind the newest head, with recent keys refreshed in the background on each new block (`cache`). All three are on by default; they cost about three times the upstream requests, so set them to `false` to trade latency for load.
-- **Shutdown.** `transport.value.close()` stops the probe timer and its visibility listener, and saves scores when `persist` is set. Later requests on every client sharing that instance reject with `TransportClosedError`. The next client built from the factory gets a fresh instance.
+- On Workers, set `headLag: { probeInterval: false }` to avoid timers outside requests.
+- Racing, pinning, coalescing, and caching are on by default. Cached answers may be one block behind and increase upstream traffic; forward log scanners should use `cache: { maxStaleBlocks: 0 }`.
+- Set endpoint `rps` and `burst` values to stay within provider rate limits.
+- Call `transport.value.close()` on shutdown to stop timers and save persisted scores.
 
 ### Observe
 
 ```ts
-import { hyperevm } from "@bloxwap/hyperevm";
-
 const transport = hyperevm({
   onEvent(event) {
     if (event.type === "failover") console.log(event.from, "->", event.to);
@@ -145,25 +140,13 @@ const transport = hyperevm({
 });
 ```
 
-`onEvent` is telemetry. A throw inside the listener does not fail the request. Besides requests, successes, errors, failovers, hedges, and races, it reports `coalesce` (a call joined one in flight), `cache` (a hit with its staleness in blocks, a miss, or a background refresh), `head` (with `trusted: false` when the head is ignored), `quarantine`, `eject`, `restore`, and `persist` (a score load or save failed). `transport.value.snapshot(method)` returns the current scores for `method` (default `eth_call`), heads, lag, quarantine, in-flight counts, and budget tokens left. The score, the registry window, and the anti-gaming rules are in [docs/ranking.md](docs/ranking.md).
+Use `onEvent` for telemetry and `transport.value.snapshot()` for current routing state.
 
 ## Documentation
 
-The ranking write-up is [docs/ranking.md](docs/ranking.md). Submitting a public endpoint is [CONTRIBUTING.md](CONTRIBUTING.md).
-
-A Fumadocs site is not part of this repository yet. The package reference lives on [`packages/hyperevm`](packages/hyperevm/README.md), and the public types are documented in JSDoc on `src/mod.ts`.
+See [routing and cache details](docs/ranking.md), [benchmarks](docs/benchmarks.md), and the [package reference](packages/hyperevm/README.md). Public endpoint submissions are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
-
-This repository is a Bun workspace with one install and one root `bun.lock`:
-
-| Workspace | Purpose |
-| --- | --- |
-| [`packages/hyperevm`](packages/hyperevm/README.md) | `@bloxwap/hyperevm` transport, registry, tests, and package tooling |
-
-The root package is private and coordinates development. The library builds to `packages/hyperevm/dist`. Exports point at TypeScript sources. Nothing in this repository is published to npm.
-
-Run these commands from the repository root:
 
 ```sh
 bun install --frozen-lockfile
@@ -172,15 +155,13 @@ bun run test
 bun run build
 ```
 
-Type-checking uses `tsc --noEmit`. `bun run rank` probes the public lists and rewrites the registry. It does not push to `main`.
+`bun run rank` updates the registry from live public-endpoint probes.
 
 ## Security
 
-**Registry rows and examples are public URLs.** Do not commit an RPC URL that contains an API key, username, or password. The ranker rejects credentials and query strings. Load a private endpoint from the environment. Bun reads a local `.env`, and this repository gitignores it.
-
-At runtime, `hyperevm()` accepts key-bearing URLs and exposes only a public label. Errors from those endpoints have every spelling of the URL replaced by the label, at any depth, response headers included. A provider that echoes the bare key on its own in an error body is not scrubbed.
-
-This package routes JSON-RPC. It does not sign transactions or hold a wallet.
+- Load private RPC URLs from the environment and never commit credentials. Runtime events and errors expose labels rather than keyed URLs.
+- Signed raw transactions may be rebroadcast after endpoint errors. Set `rebroadcastRawTransactions: false` to send only once.
+- This package routes JSON-RPC; it does not sign transactions or hold a wallet.
 
 ## License
 
