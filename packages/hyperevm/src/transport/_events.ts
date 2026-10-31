@@ -86,6 +86,17 @@ export type HyperevmEvent =
       type: "persist";
       operation: "load" | "save";
       error: Error;
+    }
+  | {
+      /**
+       * A cacheable read was answered from memory (`hit`), sent upstream (`miss`), or re-read in the background
+       * (`refresh`). On a hit, `staleBlocks` is how far behind the newest known head the answer was, or null for
+       * a precompile read, which the head does not bound.
+       */
+      type: "cache";
+      method: string;
+      outcome: "hit" | "miss" | "refresh";
+      staleBlocks: number | null;
     };
 
 /** One endpoint as the transport currently scores it. */

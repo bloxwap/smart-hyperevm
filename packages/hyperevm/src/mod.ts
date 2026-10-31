@@ -69,6 +69,8 @@ export {
   type BatchOptions,
   type BreakerOptions,
   type BudgetOptions,
+  type CacheOptions,
+  type CacheStats,
   type EndpointSnapshot,
   type HeadLagOptions,
   type HedgeOptions,

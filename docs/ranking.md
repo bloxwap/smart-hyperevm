@@ -125,9 +125,43 @@ Storage is untrusted. Restore accepts a snapshot or its JSON (at most 256 KiB), 
 
 `persist: { load, save }` does this for you. `load` runs once, on the instance's first request, so building a client at module scope on Workers does no I/O. A load that returns synchronously, or a promise that has already settled, seeds the first pick. A slower one lands when it settles and never delays or fails a call. `save` runs at most every `saveInterval` (default 10 seconds) on an unref'd timer, and on `close()`. Nothing is saved until the load settles, so a slow load cannot be overwritten by an empty snapshot. A load still pending after one `timeout` stops holding saves back and fires a `persist` event: on Workers a load started by an invocation that ended never settles. A later request re-arms a save timer the runtime cancelled with its invocation. A load or save that throws or rejects, or a stored value that is not a snapshot, fires a `persist` event. `localStoragePersistence(key)` uses `globalThis.localStorage`, and loads and saves nothing where it is missing or blocked (Workers, Node, React Native, private modes). Snapshots carry labels, never key-bearing URLs.
 
+## Read cache
+
+A round trip to any HyperEVM RPC takes tens of milliseconds, so a read answered in under a millisecond has to come from memory. `cache` is off by default. With it on, an idempotent read may be answered from memory with data at most `maxStaleBlocks` (default 1) behind the newest head the transport knows, and younger than `maxAgeMs` (default 2000). HyperEVM makes a small block about every second and has instant finality: HyperBFT finalizes a block when it is made, and there are no reorgs. So an answer is correct for the block it was read at, and anything named by a block number or hash never changes. The cache needs `headLag`: the head is what bounds staleness. It is best with `pinLatest`, which names the exact block each read was answered at.
+
+Each `"latest"` read (`eth_call`, `eth_getBalance`, `eth_getCode`, `eth_getStorageAt`, and `eth_getBlockByNumber("latest")`) is keyed by its method and params with the block tag normalized, so an implied `"latest"`, an explicit one, and the block number the pin would write share one entry. Hex strings are lower-cased in the key. The entry is stamped with the block the read was pinned to, or, for a block fetched at `"latest"`, the block's own number. Without `pinLatest` a read can reach any endpoint, so the stamp is the lowest head among the endpoints that could have served it, which may be too far behind to serve. A read at an explicit block number hits the `"latest"` entry when that is the block it was read at, which is what a client that pins for itself from `eth_blockNumber` asks for. The newest head is the highest trusted head among the endpoints that may serve the method. A head the scoreboard ignores as implausible is never served from.
+
+Reads at a block number at or below the newest head, `eth_getBlockByNumber` with a number, `eth_getBlockByHash`, `eth_getTransactionByHash` once mined, a non-null `eth_getTransactionReceipt`, the by-hash transaction count and index lookups, `eth_getLogs` with a `blockHash`, and `eth_chainId` are kept for good, in the same LRU. A state read at an explicit block is kept only when every endpoint that could have answered is known to hold that block: the official RPC answers a state read at a block it has not reached with current state rather than an error, and a pinned read is routed to holders, but an explicit number is not. A null answer is never kept.
+
+HyperCore read precompile calls (`0x…0800` to `0x…08ff`) read current HyperCore state whatever block they name, so their entries are bounded by `maxAgeMs` only, keyed without the tag, and re-read on every tick while hot.
+
+Never cached: sends and everything in [What is not retried](#what-is-not-retried) or `nonIdempotentMethods`, `eth_getTransactionCount` at `"latest"` or `"pending"` (a stale nonce breaks the next send), `eth_estimateGas`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`, `eth_feeHistory`, the filter methods, subscriptions, any read at `"pending"`, `"safe"`, `"finalized"`, or `"earliest"`, and errors. A revert is not kept either: it costs no more than a success to re-read, and a cached error object would be thrown to several callers at once.
+
+A hit returns a deep copy, and a stored answer is a deep copy, so a caller that changes what it got cannot change what the next caller gets. Entries are bounded by `maxEntries` (default 1000) and about `maxBytes` (default 8 MiB), least recently used first out. Each `hyperevm()` instance has its own cache, so factories with different endpoints or chains never share one.
+
+### Hot keys and refresh
+
+Every `"latest"`, precompile, and log read keeps its key hot. The list holds `hotKeys` (default 64) keys, least recently read first out, and a key not read for `hotIdleMs` (default 30 seconds) leaves it. Whenever the transport learns a new head, from a probe, a call, or the tick, each hot key whose entry is behind it, or about to pass `maxAgeMs`, is read again in the background, pinned to the newest head and sent only to the endpoints at it, whether or not `pinLatest` is on. A refresh goes through the same shared request table as a call, so a call that misses while its refresh is in flight joins it, but a refresh is never raced or hedged, and one key has at most one refresh in flight. A refresh that fails leaves the old entry, which still serves within `maxStaleBlocks`. A refresh is skipped when the page is hidden (`isActive`) and when no endpoint that could serve it holds a budget token, and it respects the breaker, quarantine, and chain checks like any call.
+
+While keys are hot, a tick every `refreshInterval` (default 1000 ms) sends one `eth_blockNumber` to the best-scored verified, closed, funded endpoint, since the default 4 second probe would see every fourth block. Like a probe it scores liveness, not latency. The tick stops when the last key goes idle, and restarts on the next cacheable read. On Workers a timer dies with the invocation that set it, so a request re-arms a tick that is past due. `refreshInterval: false` sends no ticks; hot keys are still refreshed when a probe or a call brings a new head.
+
+The cost is one request per tick plus one per hot key per new head: with `n` hot keys and a block a second, about `60 * (1 + n)` upstream requests a minute while the keys are hot, and nothing once they are idle. A live run with four hot keys measured about 370 a minute, three times the uncached transport's, and is in [benchmarks.md](benchmarks.md#read-cache). A longer `refreshInterval` with a matching `maxStaleBlocks`, a shorter `hotIdleMs`, or viem's `batch` option (which folds one round's reads to an endpoint into one HTTP request) each lower it.
+
+### Logs
+
+For each log filter seen recently (address and topics), the cache keeps an index of the filter's logs over a rolling window of the last `logsWindow` (default 1000) blocks, which is also the widest range the public providers accept. A range query seeds it, and each new head extends it by the new blocks only, `head − lastIndexed` of them, so a client that polls a 980-block window never has a provider scan that window again. A query whose range lies inside the index is answered from memory, filtered to the range, in block then log index order. A query ending at `"latest"` is served while the index is within `maxStaleBlocks` of the newest head and younger than `maxAgeMs`; one ending at a number is served whenever the index covers it. A query that starts inside the index but ends beyond it fetches the missing tail, merges it, and answers from the index. Anything else goes upstream and seeds or widens the index when its range touches the indexed one. A client that scans forward from the last block it saw should set `maxStaleBlocks: 0`, or a log in the newest block could be missed by a query that moves past it. An explicit end block is indexed only when every endpoint that could have answered holds it. A filter with `blockHash` is an immutable entry instead.
+
+### eth_blockNumber
+
+With the cache on, `eth_blockNumber` is answered locally from the newest trusted head while its reading is younger than `maxAgeMs`, and never goes backwards. With `pinLatest` the pinned block comes first while a head is fresh, and the cache's answer is lowered to it the same way an upstream answer is, so the number a client reads is one its next read is served at. Before the cache, with the 4 second probe and `freshMs` of 1 second, the pin had a fresh head to answer from only about a quarter of the time, and the rest of the calls went upstream: that is why a "locally answered" `eth_blockNumber` still had a p50 of tens of milliseconds. The tick keeps a head under a second old while keys are hot.
+
+### Telemetry
+
+`value.cacheStats()` returns `hits`, `misses`, `refreshes` (background reads started), `entries`, `bytes`, and `hotKeys`. A `cache` event fires for every cacheable read with `outcome` `hit`, `miss`, or `refresh`; on a hit, `staleBlocks` is how far behind the newest known head the answer was, or null for a precompile read.
+
 ## Combining the router features
 
-Racing, pinning, coalescing, budgets, warm start, and the activity pause are separate options, and they compose in one order. A request first loads stored scores (`persist`), then pins `"latest"` (`pinLatest`), then joins or starts a shared request (`coalesce`), and only the shared request routes, races, hedges, and fails over. So:
+Racing, pinning, coalescing, budgets, warm start, the activity pause, and the read cache are separate options, and they compose in one order. A request first loads stored scores (`persist`), then looks in the cache (`cache`), then pins `"latest"` (`pinLatest`), then joins or starts a shared request (`coalesce`), and only the shared request routes, races, hedges, and fails over. A miss is stored at the block it was pinned to once the shared request answers. So:
 
 - Two spellings of one read that pin to the same block, such as an implied `"latest"`, an explicit one, and the pinned block number, share one request. A race is never joined halfway: callers join above it.
 - Every racer, hedge, and failover of a pinned read is sent the same block.
@@ -135,8 +169,10 @@ Racing, pinning, coalescing, budgets, warm start, and the activity pause are sep
 - A locally answered `eth_blockNumber` sends nothing, so it spends no token and is not coalesced.
 - Restored scores feed the same scoreboard racing reads, so the first race of a session goes to the endpoints that were fastest last time.
 - While `isActive()` is false, probe ticks send nothing, and once active they still skip spent and ejected endpoints.
-- Methods that are not idempotent are never raced, pinned, or coalesced. Filters and subscriptions are not coalesced either.
-- `close()` stops the probe timer, removes the visibility listener, and saves scores once.
+- Methods that are not idempotent are never raced, pinned, coalesced, or cached. Filters and subscriptions are not coalesced or cached either.
+- A cache hit sends nothing: it spends no token, is not pinned, raced, hedged, or coalesced, and fires only a `cache` event.
+- A cache refresh is pinned to the newest head and sent to its holders alone, through the shared request table, so a call that misses joins it. It is never raced or hedged, spends one token, and is skipped while the page is hidden or the holders are spent.
+- `close()` stops the probe timer and the cache tick, removes the visibility listener, and saves scores once.
 
 | Option | Default | Section |
 | --- | --- | --- |
@@ -146,6 +182,7 @@ Racing, pinning, coalescing, budgets, warm start, and the activity pause are sep
 | `budget: { rps, burst } \| false`, endpoint `{ rps, burst }` | no budget. `burst` is `max(1, ceil(rps * 2))` | [Request budgets](#request-budgets) |
 | `persist: { load, save, maxAge, saveInterval }` | off. `maxAge` 1 hour, `saveInterval` 10 seconds | [Warm start](#warm-start) |
 | `isActive: () => boolean` | false only in a hidden browser tab | [Inactive pages and apps](#inactive-pages-and-apps) |
+| `cache: boolean \| { maxStaleBlocks, maxAgeMs, refreshInterval, hotKeys, hotIdleMs, maxEntries, maxBytes, logsWindow }` | off. `maxStaleBlocks` 1, `maxAgeMs` 2000, `refreshInterval` 1000, `hotKeys` 64, `hotIdleMs` 30000, `maxEntries` 1000, `maxBytes` 8 MiB, `logsWindow` 1000 | [Read cache](#read-cache) |
 
 ## Registry score
 
@@ -200,5 +237,8 @@ URLs with a query string, a username, or a hash are rejected. `http://` is rejec
 - `close()` does not close a child `webSocket()` transport's socket or cancel calls in flight.
 - Filters are not pinned to the node that made them. `eth_new*Filter` goes to one endpoint and is never retried, but a later `eth_getFilterChanges` may be routed elsewhere and answer "filter not found". Poll with `eth_getLogs` instead. viem's `fallback` has the same gap.
 - One factory shares an instance per `timeout`, `retryCount`, and chain, and keeps it until `close()`. Clients built with a different timeout per request each get their own instance. Fix those options when the factory is created.
+- The cache serves a `"latest"` read up to `maxStaleBlocks` behind the newest head, and a log query ending at `"latest"` may leave out the newest block's logs within that bound. A forward scanner should set `maxStaleBlocks: 0`. The cache counts on instant finality: on a chain with reorgs, immutable entries would be wrong.
+- Cache refreshes on Workers run in the invocation that saw the new head, and die with it. Entries then expire by `maxAgeMs` and the next read goes upstream. There is no `waitUntil` hook.
+- The cache does not bound a precompile answer by HyperCore time: `maxAgeMs` is the only bound, and the tick re-reads it about once a second.
 - Error redaction replaces exact spellings of a key-bearing URL. A provider that echoes the bare key elsewhere in an error is not scrubbed.
 - The simulated comparison with viem `fallback` is in [benchmarks.md](benchmarks.md). A live run is a manual workflow, not part of CI.
