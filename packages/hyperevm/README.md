@@ -117,6 +117,7 @@ const transport = hyperevm({
 - Pass a provider URL as a string or `{ url, label }`, not `http(url)`. viem drops the headers of a 429 or 503 whose body is a JSON-RPC error, so only a transport the package builds from a URL keeps the `Retry-After` the breaker honors.
 - Each endpoint's `eth_chainId` is checked before its first call. An endpoint on another chain is quarantined. Set `verifyChainId: false` to skip the check.
 - An endpoint with 3 consecutive failures, or a `Retry-After`, is ejected for a cooldown (`breaker`). Routing skips it unless every endpoint is ejected.
+- `pinLatest: true` rewrites `"latest"` on reads to a block every servable endpoint holds, and answers `eth_blockNumber` with it, so a block number from one node is one the next node can serve. Off by default.
 - The probe timer starts on the first request and stops after `headLag.probeIdleTimeout` (60 seconds) without one. `transport.value.close()` stops it and rejects later requests with `TransportClosedError`.
 - The default registry pool rests on one probe run. Prefer explicit endpoints in a service.
 

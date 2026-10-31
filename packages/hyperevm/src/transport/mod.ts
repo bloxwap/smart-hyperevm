@@ -44,6 +44,7 @@ import {
   shouldFailover,
   toError,
 } from "./_methods.ts";
+import { LatestPin, type PinLatestOptions, resolvePin } from "./_pin.ts";
 import { type ScoreConfig, defaultScoreConfig } from "./_score.ts";
 import {
   DEFAULT_MAX_AHEAD,
@@ -61,6 +62,7 @@ export {
   isRebroadcastMethod,
   shouldFailover,
 } from "./_methods.ts";
+export type { PinLatestOptions } from "./_pin.ts";
 export { blockNumberFromResult, parseQuantity } from "./_scoreboard.ts";
 export { defaultScoreConfig, endpointScore, inflation, type MethodStat, type ScoreConfig } from "./_score.ts";
 
@@ -198,6 +200,13 @@ export interface HyperevmTransportOptions {
   headLag?: boolean | HeadLagOptions | undefined;
   /** Send a second idempotent read when the first is slower than usual. Default: off. */
   hedge?: boolean | HedgeOptions | undefined;
+  /**
+   * Rewrite `"latest"`, given or implied, on idempotent reads to a block every endpoint that may serve the call
+   * holds: the lowest trusted head seen in the last `freshMs` among verified, open endpoints within `maxLag` of
+   * the highest. Without such a head the tag passes through. `eth_blockNumber` is answered with the same block
+   * unless `blockNumber` is false. Needs `headLag`. Default: off.
+   */
+  pinLatest?: boolean | PinLatestOptions | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
   routing?: "best" | "p2c" | undefined;
   /** Extra methods that must not be retried or hedged. */
@@ -418,6 +427,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
   const shared = new Map<string, ReturnType<Transport<"hyperevm", HyperevmTransportValue>>>();
   const rebroadcastRaw = options.rebroadcastRawTransactions ?? true;
   const breakerConfig = resolveBreaker(options.breaker);
+  const pinConfig = resolvePin(options.pinLatest);
 
   return (parameters: {
     account?: unknown;
@@ -473,6 +483,19 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         config: { ...defaultScoreConfig, ...options.score },
         now,
         ejected: (id: string): boolean => breaker.isOpen(id),
+      },
+    );
+    // Without head tracking there are no heads to pin to, so the whole feature stays out of the way.
+    const pin = new LatestPin(
+      { ...pinConfig, enabled: pinConfig.enabled && headLag.enabled },
+      {
+        heads: (maxAgeMs: number) => board.heads(maxAgeMs),
+        maxLag: headLag.maxLag,
+        servable: (id: string, method: string): boolean =>
+          gates.get(id)?.verified === true &&
+          !quarantined(id) &&
+          !breaker.isOpen(id) &&
+          byId.get(id)?.supports(method) === true,
       },
     );
     const listeners = new Set<(event: HyperevmEvent) => void>();
@@ -907,7 +930,12 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           const idempotent = isIdempotentMethod(method, extraNonIdempotent);
           const rebroadcast = rebroadcastRaw && isRebroadcastMethod(method);
           const params = "params" in args ? args.params : undefined;
-          return send(method, params, requestOptions?.signal, idempotent, rebroadcast);
+          const signal = requestOptions?.signal;
+          if (method === "eth_blockNumber" && idempotent && pin.answersBlockNumber) {
+            if (signal?.aborted) throw abortError(signal);
+            return pin.blockNumber() ?? pin.observe(await send(method, params, signal, idempotent, rebroadcast));
+          }
+          return send(method, pin.params(method, params, idempotent), signal, idempotent, rebroadcast);
         }) as EIP1193RequestFn,
       },
       value,
