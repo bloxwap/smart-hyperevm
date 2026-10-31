@@ -80,6 +80,12 @@ export type HyperevmEvent =
       /** A healthy answer closed an ejected endpoint's circuit. */
       type: "restore";
       endpoint: string;
+    }
+  | {
+      /** `persist.load` or `persist.save` failed, or loaded a snapshot that is not valid. Calls are unaffected. */
+      type: "persist";
+      operation: "load" | "save";
+      error: Error;
     };
 
 /** One endpoint as the transport currently scores it. */

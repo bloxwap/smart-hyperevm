@@ -122,6 +122,7 @@ const transport = hyperevm({
 - `{ url, label, rps, burst }`, or `budget: { rps, burst }` for every endpoint, keeps requests under a provider's limit with a token bucket. Probes and chain checks spend tokens too. When every endpoint is spent past the 2 second retry budget, the call throws `BudgetExhaustedError`. Default: no budget. The official endpoint allows about 1.5 rps per IP.
 - The probe timer starts on the first request and stops after `headLag.probeIdleTimeout` (60 seconds) without one. `transport.value.close()` stops it and rejects later requests with `TransportClosedError`.
 - The default registry pool rests on one probe run. Prefer explicit endpoints in a service.
+- `persist: localStoragePersistence("hyperevm:scores")` warm-starts a browser client from the last session's scores. Pass your own `{ load, save }` for other storage. Restored scores are priors that live samples replace. Heads, ejections, and chain checks are never saved. `value.scores()` and `value.restoreScores()` do the same by hand.
 
 ### Observe
 

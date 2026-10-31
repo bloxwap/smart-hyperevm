@@ -68,6 +68,7 @@ import {
   blockNumberFromResult,
   parseQuantity,
 } from "./_scoreboard.ts";
+import { type ScorePersistence, type ScoreSnapshot, WarmStart } from "./_warmstart.ts";
 
 export type { BudgetOptions } from "./_budget.ts";
 export type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
@@ -82,6 +83,12 @@ export type { PinLatestOptions } from "./_pin.ts";
 export type { RaceOptions } from "./_race.ts";
 export { blockNumberFromResult, parseQuantity } from "./_scoreboard.ts";
 export { defaultScoreConfig, endpointScore, inflation, type MethodStat, type ScoreConfig } from "./_score.ts";
+export {
+  localStoragePersistence,
+  type ScoreBook,
+  type ScorePersistence,
+  type ScoreSnapshot,
+} from "./_warmstart.ts";
 
 /** How long a head sample stays usable for lag penalties. */
 const DEFAULT_STALE_MS = 30_000;
@@ -269,6 +276,12 @@ export interface HyperevmTransportOptions {
   shouldThrow?: ((error: Error) => boolean) | undefined;
   /** Called for routing events. Exceptions are swallowed. */
   onEvent?: ((event: HyperevmEvent) => void) | undefined;
+  /**
+   * Warm-start scores from storage. `load` runs once, on the instance's first request, and `save` runs at most every
+   * `saveInterval` and on `close()`. A load still pending at the first pick lands later, so it never delays or fails
+   * a call. Load and save errors fire a `persist` event. Use {@link localStoragePersistence} in a browser. Default: off.
+   */
+  persist?: ScorePersistence | undefined;
   /** Overrides for the latency score. Defaults live in {@link defaultScoreConfig}. */
   score?: Partial<ScoreConfig> | undefined;
   /** Clock used for latency samples. Tests inject this. */
@@ -283,6 +296,18 @@ export interface HyperevmTransportValue {
   onEvent: (listener: (event: HyperevmEvent) => void) => () => void;
   /** Current scores, heads, and in-flight counts. `score` is for `method`. Default: `"eth_call"`. */
   snapshot: (method?: string) => readonly EndpointSnapshot[];
+  /**
+   * Learned latency, tail, and error books by endpoint label, as JSON to store. Heads, breaker state, and chain
+   * checks are left out, so a new session re-establishes them.
+   */
+  scores: () => ScoreSnapshot;
+  /**
+   * Seed books that have no samples yet from a {@link ScoreSnapshot} or its JSON, which may come from untrusted storage.
+   * Unknown endpoints, invalid books, and books older than `persist.maxAge` are ignored, and values are clamped.
+   * A seeded book counts as at most two samples, and the endpoint's first live sample replaces it.
+   * True when a book was seeded.
+   */
+  restoreScores: (snapshot: unknown) => boolean;
   /** Endpoints this transport was built with. `id` and `url` are the public label. */
   endpoints: readonly { id: string; url: string; weight: number }[];
   /**
@@ -566,6 +591,13 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     };
 
     const byId = new Map(built.map((endpoint) => [endpoint.id, endpoint]));
+    const warm = new WarmStart(board, {
+      persistence: options.persist,
+      ids: built.map((endpoint) => endpoint.id),
+      latencyCapMs: timeout,
+      now,
+      emit,
+    });
 
     /**
      * A healthy answer, including a terminal error, closes the circuit.
@@ -1054,12 +1086,15 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         board
           .snapshot(method)
           .map((entry) => ({ ...entry, quarantined: quarantined(entry.id), tokens: budgets.remaining(entry.id) })),
+      scores: (): ScoreSnapshot => warm.scores(),
+      restoreScores: (snapshot: unknown): boolean => warm.restore(snapshot),
       endpoints: built.map((endpoint) => ({ id: endpoint.id, url: endpoint.url, weight: endpoint.weight })),
       probe,
       close(): void {
         if (closed) return;
         closed = true;
         stopProbes();
+        warm.close();
         if (shared.get(key) === transport) shared.delete(key);
       },
     };
@@ -1075,6 +1110,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         request: (async (args: EIP1193Parameters, requestOptions?: EIP1193RequestOptions): Promise<unknown> => {
           if (closed) throw new TransportClosedError();
           touch();
+          const warming = warm.touch();
+          if (warming) await warming;
           const method = args.method;
           const idempotent = isIdempotentMethod(method, extraNonIdempotent);
           const rebroadcast = rebroadcastRaw && isRebroadcastMethod(method);
