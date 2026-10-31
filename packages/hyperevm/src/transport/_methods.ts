@@ -4,7 +4,8 @@
  * A lost response is not proof the server never saw the call, so these methods
  * go to one endpoint. `eth_subscribe` is pinned to the socket that accepted it.
  * `eth_getFilterChanges` consumes what it returns, so a re-sent poll can answer
- * `[]` for changes the lost response carried.
+ * `[]` for changes the lost response carried. Creating a filter makes state on
+ * the node, so a re-sent `eth_new*Filter` would leave a duplicate behind.
  * The exception is a signed raw transaction: sending the same bytes again has
  * the same hash, and the nonce stops it from running twice. Those two methods
  * fail over on endpoint errors (see {@link REBROADCAST_METHODS}) but are never
@@ -30,6 +31,9 @@ export const NON_IDEMPOTENT_METHODS: readonly string[] = [
   "wallet_sendCalls",
   "eth_subscribe",
   "eth_getFilterChanges",
+  "eth_newFilter",
+  "eth_newBlockFilter",
+  "eth_newPendingTransactionFilter",
 ];
 
 const DEFAULT_NON_IDEMPOTENT: ReadonlySet<string> = new Set(NON_IDEMPOTENT_METHODS);

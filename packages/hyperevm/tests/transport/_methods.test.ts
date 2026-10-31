@@ -16,6 +16,9 @@ describe("method safety", () => {
     expect(isIdempotentMethod("eth_sendTransaction")).toBe(false);
     expect(isIdempotentMethod("eth_subscribe")).toBe(false);
     expect(isIdempotentMethod("eth_getFilterChanges")).toBe(false);
+    expect(isIdempotentMethod("eth_newFilter")).toBe(false);
+    expect(isIdempotentMethod("eth_newBlockFilter")).toBe(false);
+    expect(isIdempotentMethod("eth_newPendingTransactionFilter")).toBe(false);
     expect(isIdempotentMethod("eth_getFilterLogs")).toBe(true);
     expect(isIdempotentMethod("eth_call", ["eth_call"])).toBe(false);
   });

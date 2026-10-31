@@ -39,6 +39,26 @@ describe("Breaker", () => {
     expect(breaker.isOpen("a")).toBe(false);
   });
 
+  test("a probe success clears a streak of probe failures but not one that holds a failed call", () => {
+    const breaker = new Breaker(config, () => 0);
+    breaker.failure("a", 0, true);
+    breaker.failure("a", 0, true);
+    expect(breaker.success("a", true)).toBe(false);
+    breaker.failure("a", 0, true);
+    breaker.failure("a", 0, true);
+    expect(breaker.isOpen("a")).toBe(false);
+
+    breaker.failure("b");
+    breaker.success("b", true);
+    breaker.failure("b", 0, true);
+    breaker.success("b", true);
+    expect(breaker.failure("b")).toEqual({ failures: 3, cooldownMs: 1_000 });
+    expect(breaker.success("b", true)).toBe(false);
+    expect(breaker.isOpen("b")).toBe(true);
+    expect(breaker.success("b")).toBe(true);
+    expect(breaker.isOpen("b")).toBe(false);
+  });
+
   test("Retry-After ejects at once, capped at the max cooldown", () => {
     const breaker = new Breaker(config, () => 0);
     expect(breaker.failure("a", 2_500)).toEqual({ failures: 1, cooldownMs: 2_500 });

@@ -187,7 +187,10 @@ export interface HyperevmTransportOptions {
    * from this base (100 when 0), capped at 2000, and at least any ejection left.
    */
   retryDelay?: number | undefined;
-  /** Per-attempt deadline in milliseconds. Wins over the client timeout. Default: the client timeout, or 10000. */
+  /**
+   * Per-attempt deadline in milliseconds, greater than 0. Wins over the client timeout.
+   * Default: the client timeout, or 10000.
+   */
   timeout?: number | undefined;
   /** Score `eth_call` and `eth_getLogs` separately. Default: true. */
   perMethod?: boolean | undefined;
@@ -424,6 +427,10 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     timeout?: number | undefined;
   }) => {
     const timeout = options.timeout ?? parameters.timeout ?? DEFAULT_TIMEOUT_MS;
+    // viem reads a 0 timeout as none. Here it would fail every attempt on the next tick.
+    if (!Number.isFinite(timeout) || timeout <= 0) {
+      throw new Error(`hyperevm() timeout must be a positive number of milliseconds, got ${timeout}.`);
+    }
     const retryCount = options.retryCount ?? parameters.retryCount ?? DEFAULT_RETRY_COUNT;
     const retryDelay = options.retryDelay ?? 0;
     const key = sharedKey(timeout, retryCount, parameters.chain);
@@ -433,7 +440,11 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     const breaker = new Breaker(breakerConfig, now);
     const built = buildEndpoints(options, parameters.chain, timeout);
     if (built.length === 0) {
-      throw new Error("hyperevm() requires at least one endpoint. The registry has none eligible.");
+      throw new Error(
+        options.endpoints === undefined
+          ? "hyperevm() requires at least one endpoint. The registry has none eligible."
+          : "hyperevm() requires at least one endpoint. `endpoints` is empty.",
+      );
     }
     const verifyChainId = options.verifyChainId ?? true;
     const expectedChainId = parameters.chain?.id ?? DEFAULT_CHAIN_ID;
@@ -485,18 +496,18 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
 
     /**
      * A healthy answer, including a terminal error, closes the circuit.
-     * A head probe or chain check (`call` false) cannot end an ejection early: a node that rate-limits
-     * expensive reads can still answer `eth_blockNumber`.
+     * A head probe or chain check (`call` false) cannot end an ejection early or clear a streak that holds a
+     * failed call: a node that rate-limits or hangs expensive reads can still answer `eth_blockNumber`.
      */
     const closeCircuit = (endpoint: RankedEndpoint, call: boolean): void => {
       if (!call && breaker.isOpen(endpoint.id)) return;
-      if (breaker.success(endpoint.id)) emit({ type: "restore", endpoint: endpoint.url });
+      if (breaker.success(endpoint.id, !call)) emit({ type: "restore", endpoint: endpoint.url });
     };
 
-    const openCircuit = (endpoint: RankedEndpoint, error: Error): void => {
+    const openCircuit = (endpoint: RankedEndpoint, error: Error, call: boolean): void => {
       // viem drops the headers of an HTTP 429 that carries a JSON-RPC error, so the endpoint keeps its own copy.
       const asked = Math.max(retryAfterMs(error, Date.now()), byId.get(endpoint.id)?.retryAfter() ?? 0);
-      const ejection = breaker.failure(endpoint.id, asked);
+      const ejection = breaker.failure(endpoint.id, asked, !call);
       if (!ejection) return;
       emit({
         type: "eject",
@@ -550,7 +561,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           board.failure(endpoint.id, "eth_chainId", latencyMs, false, timeout);
           emit({ type: "error", endpoint: endpoint.url, method: "eth_chainId", latencyMs, error: wrapped, terminal });
           // A 429 or outage on the check is the endpoint failing, so it counts toward ejection like any call.
-          if (!terminal) openCircuit(endpoint, wrapped);
+          if (!terminal) openCircuit(endpoint, wrapped, false);
           return wrapped;
         },
       );
@@ -674,7 +685,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
             }
             emit({ type: "error", endpoint: endpoint.url, method, latencyMs, error: wrapped, terminal });
             if (terminal) closeCircuit(endpoint, sampleLatency);
-            else openCircuit(endpoint, wrapped);
+            else openCircuit(endpoint, wrapped, sampleLatency);
           }
           throw wrapped;
         })
@@ -761,7 +772,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         }
         if (!endpoint) break;
         exclude.add(endpoint.id);
-        if (previous) emit({ type: "failover", from: previous.url, to: endpoint.url, method });
+        if (previous && previous.id !== endpoint.id)
+          emit({ type: "failover", from: previous.url, to: endpoint.url, method });
         try {
           return await dispatch(endpoint, method, params, parent, idempotent, exclude);
         } catch (error: unknown) {
@@ -807,7 +819,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         if (!target || gates.get(next.id)?.verified !== false) return launch();
         // An unverified backup is checked now. With probes off, nothing else would ever check it for a hedge.
         return untilAborted(checkChain(target), parent).then(
-          (reason) => (reason || !active() ? undefined : launch()),
+          // A concurrent call may have ejected the backup while it was checked.
+          (reason) => (reason || !active() || breaker.isOpen(next.id) ? undefined : launch()),
           () => undefined,
         );
       });
@@ -938,6 +951,8 @@ function raceHedge(
       if (started instanceof Promise) started.then(track, () => track(undefined));
       else track(started);
     }, waitMs);
+    // The primary request keeps the process alive. The hedge timer alone should not.
+    unrefTimer(timer as ReturnType<typeof setInterval>);
 
     const finish = (result: unknown, loser: Inflight | undefined): void => {
       if (settled) return;
@@ -998,6 +1013,7 @@ function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
       signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
+    // Stays ref'd: during a backoff this timer is the only work keeping the call alive.
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

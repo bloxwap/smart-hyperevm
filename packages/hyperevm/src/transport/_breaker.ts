@@ -5,6 +5,8 @@
  * on each ejection, up to a ceiling. A `Retry-After` header ejects at once for
  * the time the provider asked for. Routing skips ejected endpoints while any
  * other candidate remains. A healthy answer closes the circuit.
+ * A head probe or chain check answering does not clear a streak that holds a
+ * failed call: a node can answer `eth_blockNumber` while it hangs every read.
  * @module
  */
 
@@ -33,6 +35,7 @@ export interface Ejection {
 
 interface Circuit {
   failures: number;
+  callFailures: number;
   ejections: number;
   openUntil: number;
 }
@@ -61,20 +64,25 @@ export class Breaker {
     return Math.max(0, circuit.openUntil - this.#now());
   }
 
-  /** Record a healthy answer. Returns true when this closed an ejected circuit. */
-  success(id: string): boolean {
+  /**
+   * Record a healthy answer. Returns true when this closed an ejected circuit.
+   * A `probe` answer only clears a streak of probe failures.
+   */
+  success(id: string, probe = false): boolean {
     const circuit = this.#circuits.get(id);
     if (!circuit) return false;
+    if (probe && circuit.callFailures > 0) return false;
     const restored = circuit.ejections > 0 || circuit.openUntil > 0;
     this.#circuits.delete(id);
     return this.#config.enabled && restored;
   }
 
   /** Record an endpoint failure. Returns the ejection when this one opened the circuit. */
-  failure(id: string, retryAfterMs = 0): Ejection | undefined {
+  failure(id: string, retryAfterMs = 0, probe = false): Ejection | undefined {
     if (!this.#config.enabled) return undefined;
     const circuit = this.#circuit(id);
     circuit.failures += 1;
+    if (!probe) circuit.callFailures += 1;
     const now = this.#now();
     const askedMs = Math.min(this.#config.maxCooldownMs, Math.max(0, retryAfterMs));
     if (now < circuit.openUntil) {
@@ -96,7 +104,7 @@ export class Breaker {
   #circuit(id: string): Circuit {
     const existing = this.#circuits.get(id);
     if (existing) return existing;
-    const created: Circuit = { failures: 0, ejections: 0, openUntil: 0 };
+    const created: Circuit = { failures: 0, callFailures: 0, ejections: 0, openUntil: 0 };
     this.#circuits.set(id, created);
     return created;
   }

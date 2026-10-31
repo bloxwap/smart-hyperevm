@@ -175,12 +175,19 @@ describe("provider limits coded as invalid params", () => {
 describe("re-trying endpoints with backoff", () => {
   test("a single endpoint survives one 429 with the default retryCount", async () => {
     const rpc = mockFetch((_url, _body, seen) => (seen === 0 ? { status: 429 } : { result: "0x10" }));
-    const client = hyperevm({ endpoints: [A], fetchFn: rpc.fetchFn, headLag: false, verifyChainId: false })({
-      timeout: 1_000,
-    });
+    const events: HyperevmEvent[] = [];
+    const client = hyperevm({
+      endpoints: [A],
+      fetchFn: rpc.fetchFn,
+      headLag: false,
+      verifyChainId: false,
+      onEvent: (event) => events.push(event),
+    })({ timeout: 1_000 });
     const started = Date.now();
     expect(await client.request({ method: "eth_blockNumber" })).toBe("0x10");
     expect(rpc.calls).toHaveLength(2);
+    // A re-try on the same endpoint is not a failover.
+    expect(events.some((event) => event.type === "failover")).toBe(false);
     // Default base is 100ms with jitter between half and all of it.
     expect(Date.now() - started).toBeGreaterThanOrEqual(40);
   });
@@ -445,6 +452,26 @@ describe("breaker interactions", () => {
     expect(eject).toMatchObject({ type: "eject", endpoint: id, failures: 1 });
     // The wait counts from the response, so a millisecond may pass before the failure is recorded.
     expect(eject?.type === "eject" && eject.cooldownMs > 29_000).toBe(true);
+  });
+
+  test("an endpoint that hangs every call but answers probes is still ejected", async () => {
+    const events: HyperevmEvent[] = [];
+    const node = mockEndpoint("node", (method) => (method === "eth_blockNumber" ? "0x10" : hang()));
+    const client = open({
+      endpoints: [node.transport],
+      retryCount: 0,
+      timeout: 20,
+      breaker: { threshold: 3 },
+      onEvent: (event) => events.push(event),
+    });
+    for (let index = 0; index < 3; index += 1) {
+      await expect(client.request({ method: "eth_call", params: [] })).rejects.toThrow();
+      await client.value?.probe();
+    }
+    expect(events.filter((event) => event.type === "eject")).toEqual([
+      expect.objectContaining({ type: "eject", endpoint: "transport:0", failures: 3 }),
+    ]);
+    expect(events.some((event) => event.type === "restore")).toBe(false);
   });
 
   test("a head probe does not end an ejection early", async () => {
@@ -860,13 +887,42 @@ describe("method filters", () => {
 });
 
 describe("filter polling", () => {
-  test("eth_getFilterChanges is never re-sent after a lost response", async () => {
+  test.each([
+    ["eth_getFilterChanges", ["0x1"]],
+    ["eth_newFilter", [{ fromBlock: "latest" }]],
+    ["eth_newBlockFilter", []],
+    ["eth_newPendingTransactionFilter", []],
+  ] as const)("%s is never re-sent after a lost response", async (method, params) => {
     const node = mockEndpoint("node", (_method, seen) => {
       if (seen === 0) throw new Error("socket hang up");
       return [];
     });
     const client = open({ endpoints: [node.transport] });
-    await expect(client.request({ method: "eth_getFilterChanges", params: ["0x1"] })).rejects.toThrow(/socket hang up/);
+    await expect(client.request({ method, params: [...params] })).rejects.toThrow(/socket hang up/);
     expect(node.calls).toHaveLength(1);
+  });
+});
+
+describe("caller options", () => {
+  test("nonIdempotentMethods sends a listed method to one endpoint", async () => {
+    const rpc = mockFetch(() => ({ status: 503 }));
+    const client = open({ endpoints: [A, B], fetchFn: rpc.fetchFn, nonIdempotentMethods: ["custom_mutate"] });
+    await expect(client.request({ method: "custom_mutate" as "eth_call", params: [] })).rejects.toThrow();
+    expect(rpc.calls).toHaveLength(1);
+  });
+
+  test("shouldThrow stops a failover the transport would otherwise make", async () => {
+    const rpc = mockFetch((url) => (url === A ? { status: 503 } : { result: "0x1" }));
+    const client = open({ endpoints: [A, B], fetchFn: rpc.fetchFn, shouldThrow: () => true });
+    await expect(client.request({ method: "eth_call", params: [] })).rejects.toThrow();
+    expect(rpc.calls.map((call) => call.url)).toEqual([A]);
+  });
+
+  test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("timeout %p is rejected", (timeout) => {
+    expect(() => hyperevm({ endpoints: [A], timeout })({})).toThrow(/positive number of milliseconds/);
+  });
+
+  test("an empty endpoints list says so", () => {
+    expect(() => hyperevm({ endpoints: [] })({})).toThrow(/`endpoints` is empty/);
   });
 });

@@ -162,6 +162,32 @@ describe("hyperevm transport lifecycle", () => {
     fresh.transport.close();
   });
 
+  test("close() lets calls already in flight finish", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const node: Transport = () =>
+      createTransport({
+        key: "node",
+        name: "node",
+        type: "test",
+        retryCount: 0,
+        request: (async ({ method }: EIP1193Parameters) => {
+          if (method === "eth_chainId") return "0x3e7";
+          await gate;
+          return "0x10";
+        }) as EIP1193RequestFn,
+      });
+    const client = createPublicClient({ chain: hyperEvm, transport: hyperevm({ endpoints: [node], headLag: false }) });
+    const pending = client.request({ method: "eth_blockNumber" });
+    await sleep(10);
+    client.transport.close();
+    release?.();
+    expect(await pending).toBe("0x10");
+    await expect(client.request({ method: "eth_blockNumber" })).rejects.toBeInstanceOf(TransportClosedError);
+  });
+
   test("attempts and retry waits do not leave listeners on a long-lived signal", async () => {
     const tracked = trackedSignal();
     const client = hyperevm({
