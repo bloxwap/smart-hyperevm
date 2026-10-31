@@ -63,6 +63,14 @@ Each endpoint is tried once before any is tried again. Once every eligible endpo
 
 Hedging is off unless you set `hedge`. When it is on, an idempotent read that is still running after `max(minDelay, multiplier * tail)` is copied to the next endpoint. The first success wins. Cancelling the loser does not count as an error. Hedges never go to an ejected endpoint. A backup that has not passed its chain check is checked first, then hedged if the read is still running, so hedging works with probes off.
 
+## Racing
+
+Racing is off unless you set `race`. It costs `width` upstream requests per read, which counts against public rate limits and paid-provider quotas. With `race: true` (width 2) or `race: { width }`, the first attempt of an idempotent read goes to the best-scored endpoints at once, in score order rather than by power of two choices. The first answer wins. A racer that fails does not fail the call while another is still running. A terminal answer (a revert, invalid params, a caller abort) settles the race at once, since the failover loop would stop on it anyway. When every racer fails, the call fails over to endpoints it has not tried, and `AllEndpointsFailedError` holds each racer's error. Later attempts do not race.
+
+Only endpoints that have passed their chain check, are not quarantined, and are not ejected at dispatch are raced. An unverified endpoint is skipped and checked in the background, so the next call can race it. When every endpoint is ejected, the availability exception sends the first attempt to one endpoint and nothing races. Sends and the other methods in the next section never race.
+
+Losers are not cancelled. They run to their own deadline and record their latency and errors like any call, so each race re-measures the runner-up and the ranking follows whichever endpoint is fastest now. A loser the caller aborts records nothing, and its in-flight count ends with it. A `race` event lists the racers, best first, and each racer also gets a `request` event. With `hedge` on as well, the hedge adds the next endpoint after its delay on top of the racers.
+
 ## Registry score
 
 `packages/hyperevm/.dev/rank.ts` fetches the source lists, merges them with `packages/hyperevm/registry/nodes.json`, probes every HTTP URL, appends the observations to `packages/hyperevm/registry/history.json`, and writes ranks back. The workflow `.github/workflows/rank-registry.yml` runs that weekly and on demand, then opens a pull request. It does not push to `main`.
@@ -107,6 +115,7 @@ URLs with a query string, a username, or a hash are rejected. `http://` is rejec
 ## Gaps
 
 - There is no merged `value.subscribe`. A subscription stays on the socket that accepted `eth_subscribe`. viem's `fallback` has the same gap. HTTP endpoints do not serve subscriptions.
+- Race defaults off. Turning it on doubles upstream load at width 2. A later release may flip the default.
 - Hedge defaults off. A stall study is in [benchmarks.md](benchmarks.md). The cold hedge fires at `minDelay` (250ms), and several public nodes are slower than that, so those first calls would be duplicated.
 - The shipped history starts with one probe run. Full weight waits for the window above, so every endpoint in the first ranked file is on the new-node cap. The shipped file predates the precompile and range probes, so it reflects them only after the next `bun run rank`. Production services should pass explicit endpoints.
 - Snapshots do not show ejection state. Watch the `eject` and `restore` events.

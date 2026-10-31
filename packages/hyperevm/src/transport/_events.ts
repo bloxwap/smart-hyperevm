@@ -42,6 +42,12 @@ export type HyperevmEvent =
       method: string;
     }
   | {
+      /** An idempotent read went to these endpoints at once, best score first. Each also gets a `request`. */
+      type: "race";
+      endpoints: string[];
+      method: string;
+    }
+  | {
       type: "head";
       endpoint: string;
       head: number;
