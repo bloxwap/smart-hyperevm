@@ -35,6 +35,7 @@ import {
   DEFAULT_BREAKER_THRESHOLD,
   retryAfterMs,
 } from "./_breaker.ts";
+import { Coalescer, coalesceKey, isCoalescableMethod } from "./_coalesce.ts";
 import type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
 import {
   isAbortError,
@@ -198,6 +199,12 @@ export interface HyperevmTransportOptions {
   headLag?: boolean | HeadLagOptions | undefined;
   /** Send a second idempotent read when the first is slower than usual. Default: off. */
   hedge?: boolean | HedgeOptions | undefined;
+  /**
+   * Identical concurrent idempotent reads (same method and params) share one upstream request, and every caller
+   * gets its result or error. Nothing is kept after it settles. Sends, non-idempotent methods, subscriptions, and
+   * filters never share. Default: true.
+   */
+  coalesce?: boolean | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
   routing?: "best" | "p2c" | undefined;
   /** Extra methods that must not be retried or hedged. */
@@ -418,6 +425,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
   const shared = new Map<string, ReturnType<Transport<"hyperevm", HyperevmTransportValue>>>();
   const rebroadcastRaw = options.rebroadcastRawTransactions ?? true;
   const breakerConfig = resolveBreaker(options.breaker);
+  const coalesce = options.coalesce ?? true;
 
   return (parameters: {
     account?: unknown;
@@ -476,6 +484,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       },
     );
     const listeners = new Set<(event: HyperevmEvent) => void>();
+    // A joined call gives another call's request one attempt deadline, as it would give an endpoint of its own.
+    const coalescer = new Coalescer(timeout);
 
     const emit = (event: HyperevmEvent): void => {
       try {
@@ -907,7 +917,17 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           const idempotent = isIdempotentMethod(method, extraNonIdempotent);
           const rebroadcast = rebroadcastRaw && isRebroadcastMethod(method);
           const params = "params" in args ? args.params : undefined;
-          return send(method, params, requestOptions?.signal, idempotent, rebroadcast);
+          const signal = requestOptions?.signal;
+          // The key is computed on the params as sent, so a params rewrite (pinning `latest`) goes above this line.
+          const shareKey =
+            coalesce && isCoalescableMethod(method, idempotent) ? coalesceKey(method, params) : undefined;
+          if (shareKey === undefined) return send(method, params, signal, idempotent, rebroadcast);
+          return coalescer.request(
+            shareKey,
+            signal,
+            (sharedSignal) => send(method, params, sharedSignal, idempotent, rebroadcast),
+            () => emit({ type: "coalesce", method }),
+          );
         }) as EIP1193RequestFn,
       },
       value,

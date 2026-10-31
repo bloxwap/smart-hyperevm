@@ -178,6 +178,8 @@ describe("hyperevm transport", () => {
       now: () => nowMs,
       perMethod: true,
       score: { confidenceSamples: 1, methodBlendSamples: 1 },
+      // Each identical call must reach an endpoint on its own, so coalescing is off.
+      coalesce: false,
     });
     await Promise.all([client.request({ method: "eth_call" }), client.request({ method: "eth_call" })]);
     await client.request({ method: "eth_getLogs" });
@@ -207,6 +209,8 @@ describe("hyperevm transport", () => {
       now: () => nowMs,
       headLag: { maxLag: 0, probeInterval: false, staleMs: 60_000 },
       score: { confidenceSamples: 1 },
+      // Each identical call must reach an endpoint on its own, so coalescing is off.
+      coalesce: false,
     });
     await Promise.all([client.request({ method: "eth_blockNumber" }), client.request({ method: "eth_blockNumber" })]);
     behind.calls.length = 0;
