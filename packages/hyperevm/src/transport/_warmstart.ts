@@ -69,6 +69,11 @@ interface WarmStartOptions {
   ids: readonly string[];
   /** Largest latency a restored book may hold: the per-attempt deadline, since no live sample can be slower. */
   latencyCapMs: number;
+  /**
+   * How long a pending `load` holds saves back. On Workers a load started by an invocation that ended never
+   * settles, and saves would stop for good. Past this, saves resume, and a load that lands later still seeds.
+   */
+  loadTimeoutMs: number;
   now: () => number;
   emit: (event: HyperevmEvent) => void;
 }
@@ -82,7 +87,10 @@ export class WarmStart {
   /** `"idle"` before the first request, `"loading"` while `load` runs, `"ready"` once it settled. */
   #load: "idle" | "loading" | "ready" = "idle";
   #lastSaveAt = 0;
+  #loadStartedAt = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
+  /** When the armed timer should have fired. */
+  #dueAt = 0;
   #closed = false;
 
   constructor(board: Scoreboard, options: WarmStartOptions) {
@@ -127,6 +135,7 @@ export class WarmStart {
     }
     this.#load = "loading";
     this.#lastSaveAt = Date.now();
+    this.#loadStartedAt = this.#lastSaveAt;
     this.#schedule();
     let loaded: unknown;
     try {
@@ -183,6 +192,7 @@ export class WarmStart {
 
   #loaded(value: unknown): void {
     this.#load = "ready";
+    // Books with live samples are never replaced, so a load that lands after its deadline is still safe to apply.
     // Empty storage is not an error.
     if (this.#closed || value === undefined || value === null) return;
     if (this.#apply(value) === undefined) this.#report("load", new Error("The stored score snapshot is not valid."));
@@ -194,8 +204,15 @@ export class WarmStart {
   }
 
   #schedule(): void {
-    if (this.#timer !== undefined || this.#closed) return;
+    if (this.#closed) return;
+    if (this.#timer !== undefined) {
+      // Workers cancel an invocation's timers when it ends, and nothing clears `#timer` then. Past its due time,
+      // arm it again from this request.
+      if (Date.now() < this.#dueAt) return;
+      clearTimeout(this.#timer);
+    }
     const wait = Math.max(0, this.#lastSaveAt + this.#saveIntervalMs - Date.now());
+    this.#dueAt = Date.now() + wait;
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
       this.#save();
@@ -206,6 +223,10 @@ export class WarmStart {
 
   #save(): void {
     const persistence = this.#options.persistence;
+    if (this.#load === "loading" && Date.now() - this.#loadStartedAt >= this.#options.loadTimeoutMs) {
+      this.#load = "ready";
+      this.#report("load", new Error(`The score load did not settle within ${this.#options.loadTimeoutMs}ms.`));
+    }
     // Until the load settles, a save would overwrite stored books this instance has not read. The next request retries.
     if (!persistence || this.#load !== "ready") return;
     this.#lastSaveAt = Date.now();

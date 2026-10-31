@@ -551,6 +551,67 @@ describe("persist", () => {
     expect(book(transport, "node1")).toBeUndefined();
   });
 
+  test("a load that never settles stops holding saves back after one timeout", async () => {
+    const time = clock();
+    const events: HyperevmEvent[] = [];
+    let saves = 0;
+    const factory = hyperevm({
+      endpoints: [{ transport: mockEndpoint("a", time, 1).transport, label: "node0" }],
+      headLag: false,
+      now: time.now,
+      onEvent: (event) => events.push(event),
+      persist: {
+        // On Workers, a load started by an invocation that ended never settles.
+        load: () => new Promise(() => {}),
+        save: (): void => {
+          saves += 1;
+        },
+        saveInterval: 0,
+      },
+    });
+    const transport = factory({ timeout: 40 });
+    await transport.request({ method: "eth_call", params: [] } as never);
+    await sleep(10);
+    expect(saves).toBe(0);
+    await sleep(50);
+    await transport.request({ method: "eth_call", params: [] } as never);
+    await sleep(10);
+    expect(saves).toBeGreaterThan(0);
+    expect(persistEvents(events).map((event) => event.operation)).toEqual(["load"]);
+    transport.value?.close();
+  });
+
+  test("a save timer the runtime dropped is armed again by a later request", async () => {
+    const time = clock();
+    let saves = 0;
+    const transport = open(time, [mockEndpoint("a", time, 1)], {
+      persist: {
+        load: () => undefined,
+        save: (): void => {
+          saves += 1;
+        },
+        saveInterval: 40,
+      },
+    });
+    // Workers cancel the timers of an invocation when it ends. Drop the save timer the first request arms.
+    const realSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((handler: () => void, ms?: number, ...rest: unknown[]) =>
+      ms !== undefined && ms > 0 && ms <= 40
+        ? realSetTimeout(() => undefined, 0)
+        : realSetTimeout(handler, ms, ...rest)) as typeof setTimeout;
+    try {
+      await call(transport);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+    await sleep(60);
+    expect(saves).toBe(0);
+    await call(transport);
+    await sleep(10);
+    expect(saves).toBe(1);
+    transport.value.close();
+  });
+
   test("save errors fire a persist event and calls keep working", async () => {
     for (const save of [
       (): void => {

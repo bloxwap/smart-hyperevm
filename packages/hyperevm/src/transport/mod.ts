@@ -54,6 +54,7 @@ import type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
 import {
   isAbortError,
   isAlreadyKnownError,
+  isBlockNotHeldError,
   isIdempotentMethod,
   isRebroadcastMethod,
   shouldFailover,
@@ -243,10 +244,14 @@ export interface HyperevmTransportOptions {
    */
   race?: boolean | RaceOptions | undefined;
   /**
-   * Rewrite `"latest"`, given or implied, on idempotent reads to a block every endpoint that may serve the call
-   * holds: the lowest trusted head seen in the last `freshMs` among verified, open endpoints within `maxLag` of
-   * the highest. Without such a head the tag passes through. `eth_blockNumber` is answered with the same block
-   * unless `blockNumber` is false. Needs `headLag`. Default: off.
+   * Rewrite `"latest"`, given or implied, on idempotent reads to one block, and send the read only to endpoints
+   * known to hold it. The block is the lowest trusted head among verified, open endpoints within `maxLag` of the
+   * highest, raised to the last `eth_blockNumber` returned. A head counts however old it is, but one must be from
+   * the last `freshMs`, or the tag passes through. An endpoint with no head or a lower one does not serve the
+   * read. `eth_blockNumber` is answered with the same block unless `blockNumber` is false, and never goes back.
+   * HyperCore precompile calls (`0x…0800` to `0x…08ff`) are not pinned: they read current HyperCore state at any
+   * block. Some backends answer a state read at a block they have not reached with current state, so pinning
+   * makes `eth_getLogs` consistent there but not those reads. Needs `headLag`. Default: off.
    */
   pinLatest?: boolean | PinLatestOptions | undefined;
   /**
@@ -454,6 +459,11 @@ function abortError(signal: AbortSignal): Error {
 
 const unlinked = (): void => undefined;
 
+const noProgress = (): void => undefined;
+
+/** A call every endpoint may serve. */
+const NO_BAR: ReadonlySet<string> = new Set();
+
 /** Forwards an abort from `signal` to `controller`. Returns a function that removes the listener from `signal`. */
 function linkAbort(controller: AbortController, signal: AbortSignal | undefined): () => void {
   if (!signal) return unlinked;
@@ -580,8 +590,10 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       },
     );
     const listeners = new Set<(event: HyperevmEvent) => void>();
-    // A joined call gives another call's request one attempt deadline, as it would give an endpoint of its own.
-    const coalescer = new Coalescer(timeout);
+    // A joined call gives another call's request one attempt deadline, as it would give an endpoint of its own, plus
+    // a grace for the failover that follows a timed-out attempt. send() moves it out each time it starts an attempt
+    // or a wait, so a failover keeps its joined callers. A request stuck in a cancelled invocation never does.
+    const coalescer = new Coalescer(timeout + Math.min(timeout, INFLIGHT_GRACE_MS));
 
     const emit = (event: HyperevmEvent): void => {
       try {
@@ -599,10 +611,16 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     };
 
     const byId = new Map(built.map((endpoint) => [endpoint.id, endpoint]));
+    /** Endpoints outside `holders`, which a pinned read must not reach. None when nothing was pinned. */
+    const barredFrom = (holders: ReadonlySet<string> | undefined): ReadonlySet<string> =>
+      holders === undefined
+        ? NO_BAR
+        : new Set(built.filter((endpoint) => !holders.has(endpoint.id)).map((endpoint) => endpoint.id));
     const warm = new WarmStart(board, {
       persistence: options.persist,
       ids: built.map((endpoint) => endpoint.id),
       latencyCapMs: timeout,
+      loadTimeoutMs: timeout,
       now,
       emit,
     });
@@ -791,7 +809,10 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           const wrapped = state.timedOut && !state.ignore ? new TimeoutError(timeout) : toError(outcome.error);
           const callerAbort = parent?.aborted === true || isAbortError(wrapped);
           // A method the child's filter rejects never left the process, so it says nothing about the endpoint.
-          if (!state.ignore && !callerAbort && target.supports(method)) {
+          if (!state.ignore && !callerAbort && target.supports(method) && isBlockNotHeldError(wrapped)) {
+            // A block or two behind is not sick, and probes already score the lag. The call fails over.
+            emit({ type: "error", endpoint: endpoint.url, method, latencyMs, error: wrapped, terminal: false });
+          } else if (!state.ignore && !callerAbort && target.supports(method)) {
             // A terminal error is the endpoint answering about the call. It is not sick.
             const terminal = !shouldFailover(wrapped);
             if (terminal) {
@@ -822,14 +843,25 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       };
     };
 
+    /**
+     * `barred` endpoints never serve this call: a pinned read leaves out the endpoints not known to hold its block.
+     * They stay in `exclude` for every round, so `exclude.size > barred.size` means an endpoint failed this call.
+     * `progress` hears of each attempt and wait, so callers that joined a shared send keep waiting through them.
+     */
     const send = async (
       method: string,
       params: unknown,
       parent: AbortSignal | undefined,
       idempotent: boolean,
-      rebroadcast = false,
+      rebroadcast: boolean,
+      barred: ReadonlySet<string>,
+      progress: (waitMs?: number) => void = noProgress,
     ): Promise<unknown> => {
-      const exclude = new Set<string>();
+      const pause = (ms: number): Promise<void> => {
+        progress(ms);
+        return delay(ms, parent);
+      };
+      const exclude = new Set<string>(barred);
       const errors: Error[] = [];
       const retries = idempotent || rebroadcast;
       // A race takes the best endpoints in score order, so its lead is never a p2c draw.
@@ -856,16 +888,20 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         for (;;) {
           const picked = pickVerified(method, exclude, mode, parent, errors, !allowEjected);
           if (picked instanceof Promise) {
+            progress();
             // After a failed check an ejected endpoint is not checked next, so a storm costs one check per call.
             if (await picked) allowEjected = false;
             continue;
           }
           if (picked && wait > 0) {
-            await delay(wait, parent);
+            await pause(wait);
             wait = 0;
             continue;
           }
           if (picked && budgets.has(picked.id)) {
+            // A token refilled since pickVerified saw the bucket spent, so the pick skipped its chain check.
+            // Go back through the gate rather than send to an endpoint that never passed it.
+            if (gates.get(picked.id)?.verified === false) continue;
             endpoint = picked;
             break;
           }
@@ -876,20 +912,21 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
             const refillMs = Math.max(1, budgets.refillMs(spent));
             if (ejectionWaitMs + refillMs <= MAX_RETRY_BACKOFF_MS) {
               ejectionWaitMs += refillMs;
-              await delay(refillMs, parent);
+              await pause(refillMs);
               continue;
             }
             exhausted = new BudgetExhaustedError(spent, refillMs);
             // Endpoints that already failed this call may still have budget. Otherwise stop below the limit.
-            if (exclude.size === 0 || newRound) break;
+            if (exclude.size === barred.size || newRound) break;
           }
-          if (exclude.size > 0 && !newRound) {
+          if (exclude.size > barred.size && !newRound) {
             // Every usable endpoint failed this call, or failed its chain check. Go back to them after a backoff.
             exclude.clear();
+            for (const id of barred) exclude.add(id);
             // Stop now when the round could only wait out a longer ejection. The pick after the wait checks again.
             const candidate = board.pick(method, exclude, "best", random);
             if (!candidate || ejectionWaitMs + breaker.remaining(candidate.id) > MAX_RETRY_BACKOFF_MS) break;
-            await delay(backoffMs(round, retryBackoff, random), parent);
+            await pause(backoffMs(round, retryBackoff, random));
             round += 1;
             wait = 0;
             mode = "best";
@@ -902,7 +939,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           const leftMs = candidate ? breaker.remaining(candidate.id) : 0;
           if (leftMs <= 0 || ejectionWaitMs + leftMs > MAX_RETRY_BACKOFF_MS) break;
           ejectionWaitMs += leftMs;
-          await delay(leftMs, parent);
+          await pause(leftMs);
         }
         if (!endpoint) {
           if (exhausted) errors.push(exhausted);
@@ -911,6 +948,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         exclude.add(endpoint.id);
         if (previous && previous.id !== endpoint.id)
           emit({ type: "failover", from: previous.url, to: endpoint.url, method });
+        progress();
         try {
           return await dispatch(endpoint, method, params, parent, idempotent, exclude, errors, attempt === 0 && racing);
         } catch (error: unknown) {
@@ -1014,9 +1052,12 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     };
 
     let closed = false;
+    let probing: Promise<void> | undefined;
+    let lastProbeAt = Number.NEGATIVE_INFINITY;
 
     const probe = (): Promise<void> => {
       if (closed) return Promise.resolve();
+      lastProbeAt = Date.now();
       // An ejected endpoint is left alone until its cooldown ends. The provider may have asked for the quiet.
       // A child whose `methods` filter rejects `eth_blockNumber` is never probed: viem would refuse it locally.
       // A spent endpoint is skipped, not waited for, and so is one whose chain check took its last token.
@@ -1032,7 +1073,12 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
                   ),
             ),
       );
-      return Promise.all(pending).then(() => undefined);
+      const done = Promise.all(pending).then(() => undefined);
+      probing = done;
+      void done.finally(() => {
+        if (probing === done) probing = undefined;
+      });
+      return done;
     };
 
     const probeEvery =
@@ -1059,6 +1105,15 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       void probe();
     };
 
+    /**
+     * The page came back into view: probe now instead of waiting out the interval. Switching tabs fires this in
+     * bursts, so it probes only when no probe is in flight and none ran in the last interval.
+     */
+    const probeOnVisible = (): void => {
+      if (probing !== undefined || Date.now() - lastProbeAt < probeEvery) return;
+      probeTick();
+    };
+
     // Runs on every request. The timer starts here, so building a client does no timer work or I/O.
     const touch = (): void => {
       lastRequestAt = Date.now();
@@ -1066,7 +1121,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       probeTimer = setInterval(probeTick, probeEvery);
       unrefTimer(probeTimer);
       // A page that comes back into view probes at once instead of waiting out the interval.
-      activity.watch(probeTick);
+      activity.watch(probeOnVisible);
     };
 
     /**
@@ -1080,13 +1135,14 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       signal: AbortSignal | undefined,
       idempotent: boolean,
       rebroadcast: boolean,
+      barred: ReadonlySet<string>,
     ): Promise<unknown> => {
       const shareKey = coalesce && isCoalescableMethod(method, idempotent) ? coalesceKey(method, params) : undefined;
-      if (shareKey === undefined) return send(method, params, signal, idempotent, rebroadcast);
+      if (shareKey === undefined) return send(method, params, signal, idempotent, rebroadcast, barred);
       return coalescer.request(
         shareKey,
         signal,
-        (sharedSignal) => send(method, params, sharedSignal, idempotent, rebroadcast),
+        (sharedSignal, progress) => send(method, params, sharedSignal, idempotent, rebroadcast, barred, progress),
         () => emit({ type: "coalesce", method }),
       );
     };
@@ -1138,10 +1194,11 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
             const local = pin.blockNumber();
             if (local !== undefined) return local;
             // Each caller raises the shared answer on its own, so a joined call never sees a lower block.
-            return pin.observe(await sendShared(method, params, signal, idempotent, rebroadcast));
+            return pin.observe(await sendShared(method, params, signal, idempotent, rebroadcast, NO_BAR));
           }
           // Pin before coalescing: the key is computed on the params as sent, so pinned calls share by block.
-          return sendShared(method, pin.params(method, params, idempotent), signal, idempotent, rebroadcast);
+          const pinned = pin.pin(method, params, idempotent);
+          return sendShared(method, pinned.params, signal, idempotent, rebroadcast, barredFrom(pinned.holders));
         }) as EIP1193RequestFn,
       },
       value,

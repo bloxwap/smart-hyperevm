@@ -395,6 +395,50 @@ describe("coalescing and abort signals", () => {
   });
 });
 
+describe("coalescing alongside viem and failover", () => {
+  test("calls that share one caller signal still share viem's HTTP batch", async () => {
+    let posts = 0;
+    const fetchFn = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      posts += 1;
+      const body = JSON.parse(String(init?.body)) as { id: number; method: string } | { id: number; method: string }[];
+      const answer = (call: { id: number; method: string }) => ({
+        jsonrpc: "2.0",
+        id: call.id,
+        result: call.method === "eth_chainId" ? "0x3e7" : "0x1",
+      });
+      return new Response(JSON.stringify(Array.isArray(body) ? body.map(answer) : answer(body)), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const client = open({ endpoints: ["https://rpc.example.com/evm"], batch: true, fetchFn });
+    const controller = new AbortController();
+    const addresses = ["0x01", "0x02", "0x03"].map((tail) => `0x${"0".repeat(38)}${tail.slice(2)}`);
+    await Promise.all(
+      addresses.map((address) =>
+        client.request({ method: "eth_getBalance", params: [address, "latest"] }, { signal: controller.signal }),
+      ),
+    );
+    expect(posts).toBe(1);
+  });
+
+  test("a joined caller waits out the shared request's failover instead of sending its own", async () => {
+    const hung = mockEndpoint("hung", () => new Promise(() => {}));
+    const quick = mockEndpoint("quick", async () => {
+      await sleep(80);
+      return "0x5";
+    });
+    const client = open({ endpoints: [hung.transport, quick.transport], retryCount: 2, timeout: 200 });
+    const read = {
+      method: "eth_getBalance",
+      params: ["0x000000000000000000000000000000000000dead", "latest"],
+    } as const;
+    const first = client.request(read);
+    await sleep(50);
+    expect(await Promise.all([first, client.request(read)])).toEqual(["0x5", "0x5"]);
+    expect([hung.reads().length, quick.reads().length]).toEqual([1, 1]);
+  });
+});
+
 describe("Coalescer", () => {
   test("a joined caller stops waiting on a request that never settles and starts its own", async () => {
     const coalescer = new Coalescer(20);
@@ -411,6 +455,24 @@ describe("Coalescer", () => {
     expect(await Promise.race([joined, sleep(500).then(() => "hung")])).toBe("0xfresh");
     expect(runs).toBe(2);
     expect(joins).toBe(1);
+  });
+
+  test("a joined caller keeps waiting while the shared request reports progress", async () => {
+    const coalescer = new Coalescer(30);
+    let runs = 0;
+    const run = (_signal: AbortSignal | undefined, progress: (waitMs?: number) => void): Promise<unknown> => {
+      runs += 1;
+      // A failover every 20ms, then an answer at 80ms: past the bound, but never 30ms without news.
+      const ticks = [20, 40, 60].map((ms) => setTimeout(() => progress(), ms));
+      return sleep(80).then(() => {
+        for (const tick of ticks) clearTimeout(tick);
+        return "0xshared";
+      });
+    };
+    const first = coalescer.request("k", undefined, run, () => undefined);
+    const joined = coalescer.request("k", undefined, run, () => undefined);
+    expect(await Promise.all([first, joined])).toEqual(["0xshared", "0xshared"]);
+    expect(runs).toBe(1);
   });
 
   test("entries leave the table when they settle", async () => {

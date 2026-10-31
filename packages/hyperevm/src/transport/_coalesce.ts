@@ -89,24 +89,42 @@ function writeValue(value: unknown, out: string[], path: Set<object>): boolean {
 interface Entry {
   promise: Promise<unknown>;
   /** Present only when the shared request runs under a signal it can be cancelled with. */
-  controller: AbortController | undefined;
+  cancel: Cancel | undefined;
   /** Callers still waiting on it. */
   waiting: number;
+  /** True once every caller has stopped waiting. */
+  abandoned: boolean;
   /** Wall-clock time after which no caller joins, and joined callers stop waiting. */
   deadline: number;
 }
 
-type Run = (signal: AbortSignal | undefined) => Promise<unknown>;
+/**
+ * The controller behind every shared request started by callers with one signal. viem's HTTP transport batches by
+ * signal, so a controller per request would put each read in a batch of its own. It aborts once each of its
+ * requests in flight has been abandoned, which can only happen after that caller signal aborted.
+ */
+interface Cancel {
+  controller: AbortController;
+  live: Set<Entry>;
+}
+
+/**
+ * Starts the shared request. It calls `progress` each time it starts an attempt, or before a wait of `waitMs`,
+ * which keeps joined callers waiting another `maxWaitMs` from then.
+ */
+type Run = (signal: AbortSignal | undefined, progress: (waitMs?: number) => void) => Promise<unknown>;
 
 /** One instance's table of shared in-flight reads. */
 export class Coalescer {
   readonly #entries = new Map<string, Entry>();
+  readonly #cancels = new WeakMap<AbortSignal, Cancel>();
   readonly #maxWaitMs: number;
 
   /**
-   * `maxWaitMs` bounds how long a joined caller waits on another caller's request. On Workers the invocation that
-   * started it can end and take its I/O and timers with it, so the shared promise may never settle. A caller past
-   * the bound starts a fresh request, and the stuck one is never joined again.
+   * `maxWaitMs` bounds how long a joined caller waits on another caller's request without news from it. On Workers
+   * the invocation that started it can end and take its I/O and timers with it, so the shared promise may never
+   * settle. A caller past the bound starts a fresh request, and the stuck one is never joined again. A request that
+   * reports progress (a failover, a backoff) moves the bound out, so its callers do not leave it just as it retries.
    */
   constructor(maxWaitMs: number) {
     this.#maxWaitMs = maxWaitMs;
@@ -120,30 +138,45 @@ export class Coalescer {
   /**
    * Join the in-flight request for `key`, or start one with `run`. `run` gets the signal the shared request must
    * honour: undefined when the first caller has none, since that request is never cancelled, and viem's HTTP batch
-   * key then stays the shared default. `onJoin` fires for a caller that joined an existing request.
+   * key then stays the shared default. Requests started under one caller signal get one signal between them, so
+   * they still batch together. `onJoin` fires for a caller that joined an existing request.
    * A caller whose signal has already aborted neither joins nor starts one: `run` gets its signal, as uncoalesced.
    */
   request(key: string, signal: AbortSignal | undefined, run: Run, onJoin: () => void): Promise<unknown> {
-    if (signal?.aborted) return run(signal);
+    if (signal?.aborted) return run(signal, ignore);
     const existing = this.#entries.get(key);
     if (existing && Date.now() < existing.deadline) {
       onJoin();
       return this.#wait(key, existing, signal, () => this.request(key, signal, run, ignore));
     }
-    return this.#wait(key, this.#start(key, signal !== undefined, run), signal, undefined);
+    return this.#wait(key, this.#start(key, signal, run), signal, undefined);
   }
 
-  #start(key: string, cancellable: boolean, run: Run): Entry {
-    const controller = cancellable ? new AbortController() : undefined;
+  #start(key: string, signal: AbortSignal | undefined, run: Run): Entry {
+    const cancel = signal === undefined ? undefined : this.#cancelFor(signal);
+    const entry: Entry = {
+      promise: Promise.resolve(),
+      cancel,
+      waiting: 0,
+      abandoned: false,
+      deadline: Date.now() + this.#maxWaitMs,
+    };
+    const progress = (waitMs = 0): void => {
+      entry.deadline = Math.max(entry.deadline, Date.now() + waitMs + this.#maxWaitMs);
+    };
     let started: Promise<unknown>;
     try {
-      started = run(controller?.signal);
+      started = run(cancel?.controller.signal, progress);
     } catch (error) {
       started = Promise.reject(error);
     }
-    const entry: Entry = { promise: started, controller, waiting: 0, deadline: Date.now() + this.#maxWaitMs };
+    cancel?.live.add(entry);
     entry.promise = started.finally(() => {
       if (this.#entries.get(key) === entry) this.#entries.delete(key);
+      if (cancel) {
+        cancel.live.delete(entry);
+        this.#cancelIfAbandoned(cancel);
+      }
     });
     // Every caller may have stopped waiting before it settles. Nobody else observes the shared rejection.
     entry.promise.catch(ignore);
@@ -176,19 +209,27 @@ export class Coalescer {
           reject(abortReason(signal));
         });
       signal?.addEventListener("abort", onAbort, { once: true });
-      if (retry) {
+      const arm = (): void => {
+        if (!retry) return;
         timer = setTimeout(
-          () =>
+          () => {
+            // The shared request moved its deadline out since this timer was armed.
+            if (Date.now() < entry.deadline) {
+              arm();
+              return;
+            }
             settle(() => {
               if (this.#entries.get(key) === entry) this.#entries.delete(key);
               this.#leave(key, entry);
               retry().then(resolve, reject);
-            }),
+            });
+          },
           Math.max(0, entry.deadline - Date.now()),
         );
         // The shared request carries the work. This timer only bounds the wait on it.
         unrefTimer(timer);
-      }
+      };
+      arm();
       entry.promise.then(
         (result) => settle(() => resolve(result)),
         (error: unknown) => settle(() => reject(error)),
@@ -199,9 +240,26 @@ export class Coalescer {
   /** One caller stopped waiting. Cancel the shared request when it was the last and the request can be cancelled. */
   #leave(key: string, entry: Entry): void {
     entry.waiting -= 1;
-    if (entry.waiting > 0 || !entry.controller) return;
+    if (entry.waiting > 0 || !entry.cancel) return;
+    entry.abandoned = true;
     if (this.#entries.get(key) === entry) this.#entries.delete(key);
-    entry.controller.abort();
+    this.#cancelIfAbandoned(entry.cancel);
+  }
+
+  /** The live controller for requests started under `signal`, or a new one once the last has aborted. */
+  #cancelFor(signal: AbortSignal): Cancel {
+    const existing = this.#cancels.get(signal);
+    if (existing && !existing.controller.signal.aborted) return existing;
+    const cancel: Cancel = { controller: new AbortController(), live: new Set() };
+    this.#cancels.set(signal, cancel);
+    return cancel;
+  }
+
+  /** Abort once no request on `cancel` has a caller left. A request still awaited keeps its siblings running. */
+  #cancelIfAbandoned(cancel: Cancel): void {
+    if (cancel.live.size === 0) return;
+    for (const entry of cancel.live) if (!entry.abandoned) return;
+    cancel.controller.abort();
   }
 }
 

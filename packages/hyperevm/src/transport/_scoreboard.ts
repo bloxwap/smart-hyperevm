@@ -187,17 +187,22 @@ export class Scoreboard {
   }
 
   /**
-   * Heads seen in the last `maxAgeMs`, capped at `staleMs`. `trusted` is false when no reference is believed
-   * or the head is ignored as implausible, as on the `head` event.
+   * Heads seen in the last `maxAgeMs`, capped at `staleMs`, with how long ago each was seen. `trusted` is false
+   * when no reference is believed or the head is ignored as implausible, as on the `head` event.
    */
-  heads(maxAgeMs: number): { id: string; head: number; trusted: boolean }[] {
+  heads(maxAgeMs: number): { id: string; head: number; ageMs: number; trusted: boolean }[] {
     const now = this.#options.now();
     const view = this.#heads(now);
     const maxAge = Math.min(maxAgeMs, this.#options.staleMs);
-    const readings: { id: string; head: number; trusted: boolean }[] = [];
+    const readings: { id: string; head: number; ageMs: number; trusted: boolean }[] = [];
     for (const endpoint of this.#endpoints) {
       if (endpoint.head === null || now - endpoint.headAt > maxAge) continue;
-      readings.push({ id: endpoint.id, head: endpoint.head, trusted: view.best !== null && !view.liars.has(endpoint) });
+      readings.push({
+        id: endpoint.id,
+        head: endpoint.head,
+        ageMs: Math.max(0, now - endpoint.headAt),
+        trusted: view.best !== null && !view.liars.has(endpoint),
+      });
     }
     return readings;
   }

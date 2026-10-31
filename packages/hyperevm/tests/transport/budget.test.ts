@@ -423,3 +423,38 @@ describe("non-idempotent methods under budgets", () => {
     expect(b.calls).toHaveLength(0);
   });
 });
+
+describe("budgets and chain checks", () => {
+  test("a token that refills between picks never sends a read to an unverified endpoint", async () => {
+    // The clock moves 1ms every few reads, so a bucket spent at one check can hold a token at the next.
+    // Which read crosses the boundary depends on how often the transport reads the clock, so try several rates.
+    for (let readsPerMs = 2; readsPerMs <= 9; readsPerMs += 1) {
+      let reads = 0;
+      const node = mockEndpoint((method) => {
+        if (method === "eth_chainId") throw new Error("upstream unavailable");
+        return "0xdead";
+      });
+      const client = open({
+        endpoints: [node.transport],
+        verifyChainId: true,
+        budget: { rps: 1_000, burst: 1 },
+        breaker: false,
+        retryCount: 0,
+        retryDelay: 1,
+        now: () => {
+          reads += 1;
+          return Math.floor(reads / readsPerMs);
+        },
+      });
+      const outcomes: unknown[] = [];
+      for (let index = 0; index < 30; index += 1) {
+        outcomes.push(await client.request({ method: "eth_getBalance", params: [] }).catch((error: unknown) => error));
+      }
+      expect({ readsPerMs, sent: node.calls.filter((method) => method === "eth_getBalance") }).toEqual({
+        readsPerMs,
+        sent: [],
+      });
+      expect(outcomes).not.toContain("0xdead");
+    }
+  });
+});

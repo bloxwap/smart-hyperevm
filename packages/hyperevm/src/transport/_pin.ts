@@ -3,20 +3,32 @@
  *
  * Endpoints a block or two apart answer `"latest"` for different blocks, so an `eth_blockNumber` from one node
  * and an `eth_getLogs` from the next can disagree, and a failover can answer for an older block than the first
- * attempt saw. Rewriting the tag to the lowest fresh head among the servable endpoints makes every attempt,
- * failover, and hedge answer for the same block. `eth_blockNumber` is then answered with that block, so the
- * number a client reads is one the next read can be served at.
+ * attempt saw. Rewriting the tag to one block makes every attempt, failover, race, and hedge answer for it.
+ *
+ * Heads only go up, so the last head seen from an endpoint is a block it holds even once that reading is old.
+ * The pin is the lowest such head within `maxLag` of the highest, and it needs at least one head seen in the last
+ * `freshMs`. A pinned read goes only to the endpoints known to hold its block: one with no head, a head below it,
+ * or no chain check yet is left out of that read. `eth_blockNumber` is answered with the same block, so the
+ * number a client reads is one the next read can be served at. It never goes backwards: once a block is returned,
+ * reads pin to it while an endpoint holds it.
+ *
+ * HyperCore read precompiles (`0x…0800` to `0x…08ff`) answer from current HyperCore state whatever block they are
+ * given, so their `eth_call`s are not pinned. Some backends also answer a state read at a block they have not
+ * reached with current state instead of an error. Pinning cannot make either consistent.
  * @module
  */
 
 import { parseQuantity } from "./_scoreboard.ts";
 
-/** Heads older than this do not pin. HyperEVM makes about one block per second. */
+/** Without a head this recent, nothing pins. HyperEVM makes about one block per second. */
 export const DEFAULT_PIN_FRESH_MS = 1_000;
 
 /** Options for `pinLatest`. */
 export interface PinLatestOptions {
-  /** Heads older than this many milliseconds do not pin. Default: 1000. */
+  /**
+   * Pin only while some endpoint's head was seen in the last this many milliseconds. Older heads still count as
+   * blocks their endpoints hold. Default: 1000.
+   */
   freshMs?: number | undefined;
   /**
    * Answer `eth_blockNumber` locally with the block a pinned `"latest"` would use, when one exists.
@@ -36,13 +48,21 @@ export interface PinConfig {
 export interface HeadReading {
   readonly id: string;
   readonly head: number;
+  /** Milliseconds since the head was seen. */
+  readonly ageMs: number;
   /** False when no reference head is believed or this head is ignored as implausible. */
   readonly trusted: boolean;
 }
 
+/** A block to pin to, and the endpoints known to hold it. */
+export interface PinTarget {
+  readonly block: number;
+  readonly holders: ReadonlySet<string>;
+}
+
 /** What the pin reads from the transport. */
 export interface PinSource {
-  /** Heads seen in the last `maxAgeMs`. */
+  /** Heads seen in the last `maxAgeMs`, capped at the transport's `staleMs`. */
   heads: (maxAgeMs: number) => readonly HeadReading[];
   /** Blocks behind the highest servable head that still pin. */
   maxLag: number;
@@ -84,6 +104,7 @@ function toHex(block: number): string {
 export function pinParams(method: string, params: unknown, block: number): unknown {
   if (!Array.isArray(params)) return params;
   if (method === "eth_getLogs") return pinLogs(params, block);
+  if (method === "eth_call" && isPrecompileCall(params[0])) return params;
   const slot = BLOCK_SLOTS.get(method);
   // A call missing an earlier param cannot carry the tag. The endpoint rejects it as sent.
   if (!slot || params.length < slot.index) return params;
@@ -93,6 +114,14 @@ export function pinParams(method: string, params: unknown, block: number): unkno
   const next = [...params];
   next[slot.index] = pinned;
   return next;
+}
+
+/** HyperCore read precompiles live at `0x0000…0800` through `0x0000…08ff` and ignore the block tag. */
+const PRECOMPILE_ADDRESS = /^0x0{37}8[0-9a-f]{2}$/i;
+
+function isPrecompileCall(call: unknown): boolean {
+  if (typeof call !== "object" || call === null || !("to" in call)) return false;
+  return typeof call.to === "string" && PRECOMPILE_ADDRESS.test(call.to);
 }
 
 /** The pinned form of one tag, or undefined when it is not `"latest"`. */
@@ -125,6 +154,13 @@ function pinLogs(params: readonly unknown[], block: number): unknown {
   ];
 }
 
+/** `params` as sent, and the endpoints that may serve them when `"latest"` was pinned. */
+export interface PinnedParams {
+  readonly params: unknown;
+  /** Undefined when nothing was pinned. Every endpoint may then serve the call. */
+  readonly holders: ReadonlySet<string> | undefined;
+}
+
 /** Per-instance pinning. Holds one number: the highest `eth_blockNumber` it has returned. */
 export class LatestPin {
   readonly #config: PinConfig;
@@ -142,45 +178,58 @@ export class LatestPin {
   }
 
   /**
-   * The lowest fresh, trusted head among endpoints that may serve `method`, or null when none qualifies.
-   * Heads more than `maxLag` behind the highest of them are left out: that endpoint is scored down already,
-   * and waiting on it would pin state several blocks old.
+   * The block a pinned `method` would read, and the endpoints known to hold it, or null when nothing pins.
+   * Every trusted head of an endpoint that may serve `method` counts as a block it holds, however old, but at
+   * least one must be fresh. Heads more than `maxLag` behind the highest are left out: that endpoint is scored
+   * down already, and waiting on it would pin state several blocks old. It is left out of the read too.
+   * The block is the lowest head left, raised to the last `eth_blockNumber` returned while an endpoint holds that.
    */
-  floor(method: string): number | null {
+  target(method: string): PinTarget | null {
+    const readings: HeadReading[] = [];
+    let fresh = false;
     let top: number | null = null;
-    const usable: number[] = [];
-    for (const reading of this.#source.heads(this.#config.freshMs)) {
+    for (const reading of this.#source.heads(Number.POSITIVE_INFINITY)) {
       if (!reading.trusted || !this.#source.servable(reading.id, method)) continue;
-      usable.push(reading.head);
+      readings.push(reading);
+      if (reading.ageMs <= this.#config.freshMs) fresh = true;
       if (top === null || reading.head > top) top = reading.head;
     }
-    if (top === null) return null;
+    if (!fresh || top === null) return null;
     const cutoff = top - this.#source.maxLag;
     let floor = top;
-    for (const head of usable) if (head >= cutoff && head < floor) floor = head;
-    return floor;
+    for (const reading of readings) if (reading.head >= cutoff && reading.head < floor) floor = reading.head;
+    const block = this.#served > floor && this.#served <= top ? this.#served : floor;
+    const holders = new Set<string>();
+    for (const reading of readings) if (reading.head >= block) holders.add(reading.id);
+    return { block, holders };
   }
 
-  /** `params` with `"latest"` pinned, for an idempotent read while a floor exists. Otherwise `params` itself. */
-  params(method: string, params: unknown, idempotent: boolean): unknown {
-    if (!this.#config.enabled || !idempotent) return params;
-    if (method !== "eth_getLogs" && !BLOCK_SLOTS.has(method)) return params;
-    const block = this.floor(method);
-    return block === null ? params : pinParams(method, params, block);
+  /** `params` with `"latest"` pinned for an idempotent read while a target exists, and who may serve it. */
+  pin(method: string, params: unknown, idempotent: boolean): PinnedParams {
+    if (!this.#config.enabled || !idempotent) return { params, holders: undefined };
+    if (method !== "eth_getLogs" && !BLOCK_SLOTS.has(method)) return { params, holders: undefined };
+    const target = this.target(method);
+    if (target === null) return { params, holders: undefined };
+    const pinned = pinParams(method, params, target.block);
+    return pinned === params ? { params, holders: undefined } : { params: pinned, holders: target.holders };
   }
 
   /** The local `eth_blockNumber` answer, or undefined when it must go upstream. */
   blockNumber(): string | undefined {
     if (!this.answersBlockNumber) return undefined;
-    const block = this.floor("eth_blockNumber");
-    return block === null ? undefined : toHex(this.#serve(block));
+    const target = this.target("eth_blockNumber");
+    return target === null ? undefined : toHex(this.#serve(target.block));
   }
 
-  /** An upstream `eth_blockNumber` answer, raised to the highest one already returned. */
+  /**
+   * An upstream `eth_blockNumber` answer, lowered to the block a pinned read would use now that the answer is a
+   * head, and raised to the highest one already returned.
+   */
   observe(result: unknown): unknown {
     const block = parseQuantity(result);
     if (block === null) return result;
-    const served = this.#serve(block);
+    const target = this.target("eth_blockNumber");
+    const served = this.#serve(target === null ? block : Math.min(block, target.block));
     return served === block ? result : toHex(served);
   }
 

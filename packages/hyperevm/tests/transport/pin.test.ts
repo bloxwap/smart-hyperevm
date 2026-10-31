@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Transport } from "viem";
 
 import { pinParams, resolvePin } from "../../src/transport/_pin.ts";
-import { hyperevm, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { type HyperevmEvent, type HyperevmTransportOptions, hyperevm } from "../../src/transport/mod.ts";
 
 interface Call {
   method: string;
@@ -256,12 +256,12 @@ describe("pinLatest", () => {
     ]);
     expect(low.reads()).toHaveLength(1);
     expect(await client.request({ method: "eth_blockNumber" })).toBe("0x66");
-    // Back after the cooldown, low holds the pin down again. eth_blockNumber does not go backwards.
+    // Back after the cooldown at 100, low cannot serve the 102 eth_blockNumber returned, so reads stay there.
     failing = false;
     nowMs = 5_000;
     await client.value.probe();
     await client.request({ method: "eth_call", params: [TX] });
-    expect([...low.reads().slice(1), ...high.reads().slice(2)].map((call) => call.params)).toEqual([[TX, "0x64"]]);
+    expect([...low.reads().slice(1), ...high.reads().slice(2)].map((call) => call.params)).toEqual([[TX, "0x66"]]);
     expect(await client.request({ method: "eth_blockNumber" })).toBe("0x66");
   });
 
@@ -434,6 +434,147 @@ describe("split nodes", () => {
     expect([...ahead.reads(), ...behind.reads()].map((call) => call.params)).toEqual([
       [{ fromBlock: "0x67", toBlock: "0x67" }],
       [{ fromBlock: "0x67", toBlock: "0x67" }],
+    ]);
+  });
+});
+
+describe("endpoints that may serve a pinned read", () => {
+  /**
+   * A node at `head.value` that serves reads only at blocks it holds, as HyperEVM nodes do: `eth_getLogs` past
+   * its head is `-32602 invalid block range`, and a state read past it is `-32000 header not found`.
+   * `fail` makes a read fail as an outage instead.
+   */
+  function holding(name: string, head: { value: number }, fail: () => boolean = () => false): MockEndpoint {
+    return mockEndpoint(name, (method, params) => {
+      if (method === "eth_chainId") return "0x3e7";
+      if (method === "eth_blockNumber") return hex(head.value);
+      if (fail()) throw new Error("upstream unavailable");
+      if (method === "eth_getLogs") {
+        const filter = (params as [{ fromBlock?: string; toBlock?: string }])[0];
+        const to = filter.toBlock === undefined || filter.toBlock === "latest" ? head.value : Number(filter.toBlock);
+        if (to > head.value) throw Object.assign(new Error("invalid block range"), { code: -32602 });
+        return [];
+      }
+      const tag = (params as unknown[])[1];
+      if (typeof tag === "string" && tag.startsWith("0x") && Number(tag) > head.value) {
+        throw Object.assign(new Error("header not found"), { code: -32000 });
+      }
+      return "0x1";
+    });
+  }
+
+  test("a pinned read never goes to an endpoint whose last head is below the pin", async () => {
+    let nowMs = 0;
+    const aHead = { value: 100 };
+    const bHead = { value: 100 };
+    let aFails = false;
+    const a = holding("a", aHead, () => {
+      if (!aFails) return false;
+      aFails = false;
+      return true;
+    });
+    const b = holding("b", bHead);
+    const client = open({ endpoints: [a.transport, b.transport], now: () => nowMs });
+    await client.value.probe();
+    // Two seconds on, both heads are past freshMs. a answers eth_blockNumber, so only its head is fresh.
+    nowMs = 2_000;
+    aHead.value = 103;
+    bHead.value = 102;
+    expect(await client.request({ method: "eth_blockNumber" })).toBe("0x67");
+    // b was last seen at 100. A read pinned to 103 must not fail over to it, even after a fails once.
+    aFails = true;
+    expect(await client.request({ method: "eth_getLogs", params: [{ fromBlock: "0x60" }] })).toEqual([]);
+    expect(b.reads()).toEqual([]);
+    expect(a.reads().map((call) => call.params)).toEqual([
+      [{ fromBlock: "0x60", toBlock: "0x67" }],
+      [{ fromBlock: "0x60", toBlock: "0x67" }],
+    ]);
+  });
+
+  test("an older head within maxLag still holds the pin down, and eth_blockNumber reads the pin", async () => {
+    let nowMs = 0;
+    const aHead = { value: 100 };
+    const b = holding("b", { value: 100 });
+    const a = holding("a", aHead);
+    const client = open({ endpoints: [a.transport, b.transport], now: () => nowMs });
+    await client.value.probe();
+    nowMs = 1_500;
+    aHead.value = 102;
+    // a says 102, but b is only known to hold 100. The number returned is one both can serve.
+    expect(await client.request({ method: "eth_blockNumber" })).toBe("0x64");
+    await client.request({ method: "eth_call", params: [TX] });
+    expect([...a.reads(), ...b.reads()].map((call) => call.params)).toEqual([[TX, "0x64"]]);
+  });
+
+  test("after eth_blockNumber returns a block, pinned reads never go below it", async () => {
+    let nowMs = 0;
+    const lowHead = { value: 100 };
+    let lowDown = true;
+    let highDown = false;
+    const low = holding("low", lowHead, () => lowDown);
+    const high = holding("high", { value: 102 }, () => highDown);
+    const client = open({
+      endpoints: [low.transport, high.transport],
+      breaker: { threshold: 1, cooldown: 5_000 },
+      now: () => nowMs,
+    });
+    await client.value.probe();
+    // low fails and is ejected, so the floor is high's 102, and eth_blockNumber returns it.
+    await client.request({ method: "eth_call", params: [TX] });
+    expect(await client.request({ method: "eth_blockNumber" })).toBe("0x66");
+    // low rejoins at 100. Reads stay at 102 and go only to the endpoint that holds it.
+    lowDown = false;
+    nowMs = 5_000;
+    await client.value.probe();
+    await client.request({ method: "eth_call", params: [TX] });
+    expect(high.reads().at(-1)?.params).toEqual([TX, "0x66"]);
+    expect(low.reads()).toHaveLength(1);
+    expect(await client.request({ method: "eth_blockNumber" })).toBe("0x66");
+    // Once low catches up, it serves again: a failure on high now fails over to it.
+    lowHead.value = 102;
+    nowMs = 6_000;
+    await client.value.probe();
+    highDown = true;
+    expect(await client.request({ method: "eth_call", params: [TX] })).toBe("0x1");
+    expect(low.reads().at(-1)?.params).toEqual([TX, "0x66"]);
+  });
+
+  test("a node that does not hold a block yet fails over without a breaker strike", async () => {
+    const reads = [
+      { method: "eth_getBalance", params: [ADDRESS, "0x67"] },
+      { method: "eth_getLogs", params: [{ fromBlock: "0x60", toBlock: "0x67" }] },
+    ] as const;
+    for (const read of reads) {
+      const ahead = holding("ahead", { value: 103 });
+      const behind = holding("behind", { value: 102 });
+      const events: HyperevmEvent[] = [];
+      const client = open({
+        endpoints: [behind.transport, ahead.transport],
+        pinLatest: false,
+        breaker: { threshold: 1 },
+        onEvent: (event) => events.push(event),
+        now: () => 0,
+      });
+      await client.value.probe();
+      // An explicit block from the node ahead: the one behind cannot serve it, and is not sick for that.
+      await client.request(read);
+      expect(behind.reads().map((call) => call.method)).toEqual([read.method]);
+      expect(ahead.reads().map((call) => call.method)).toEqual([read.method]);
+      expect(events.filter((event) => event.type === "eject")).toEqual([]);
+      expect(client.value.snapshot().map((entry) => entry.methods["*"]?.error ?? 0)).toEqual([0, 0]);
+    }
+  });
+
+  test("HyperCore precompile reads are not pinned, since they ignore the block", async () => {
+    const a = node("a", { value: 100 });
+    const client = open({ endpoints: [a.transport], now: () => 0 });
+    await client.value.probe();
+    const precompile = { to: "0x0000000000000000000000000000000000000801", data: "0x" };
+    await client.request({ method: "eth_call", params: [precompile, "latest"] });
+    await client.request({ method: "eth_call", params: [TX, "latest"] });
+    expect(a.reads().map((call) => call.params)).toEqual([
+      [precompile, "latest"],
+      [TX, "0x64"],
     ]);
   });
 });

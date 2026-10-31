@@ -164,6 +164,30 @@ describe("racer failures", () => {
   });
 });
 
+describe("racers at different heads", () => {
+  test("a racer that has not reached the block does not end the race", async () => {
+    const events: HyperevmEvent[] = [];
+    const current = mockEndpoint("current", async () => {
+      await sleep(30);
+      return [];
+    });
+    // One block behind, and quick to say so.
+    const behind = mockEndpoint("behind", async () => {
+      await sleep(5);
+      throw rpcError("invalid block range", -32602);
+    });
+    const client = open({
+      endpoints: [current.transport, behind.transport],
+      breaker: { threshold: 1 },
+      onEvent: (event) => events.push(event),
+    });
+    const filter = { address: "0x000000000000000000000000000000000000dead", fromBlock: "0x10", toBlock: "0x67" };
+    expect(await client.request({ method: "eth_getLogs", params: [filter] })).toEqual([]);
+    expect([reads(current), reads(behind)]).toEqual([["eth_getLogs"], ["eth_getLogs"]]);
+    expect(events.filter((event) => event.type === "eject")).toEqual([]);
+  });
+});
+
 describe("losers", () => {
   test("finish after the winner returns and keep their latency sample", async () => {
     let clock = 1_000;

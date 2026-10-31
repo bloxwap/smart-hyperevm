@@ -150,6 +150,21 @@ describe("hyperevm probes pause while inactive", () => {
     reader.transport.close();
   });
 
+  test("switching tabs back and forth runs at most one probe per interval", async () => {
+    const document = fakeDocument("visible");
+    const nodes = [node("a")];
+    const reader = client(nodes, { headLag: { probeInterval: 60_000 } });
+    await reader.request({ method: "eth_chainId" });
+    for (let index = 0; index < 20; index += 1) {
+      document.hide();
+      document.show();
+      await sleep(index % 4 === 0 ? 5 : 0);
+    }
+    await sleep(10);
+    expect(probes(nodes)).toBe(1);
+    reader.transport.close();
+  });
+
   test("ticks resume once the page is visible, with no event", async () => {
     const document = fakeDocument("hidden");
     const nodes = [node("a")];
