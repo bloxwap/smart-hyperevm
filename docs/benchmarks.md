@@ -119,3 +119,17 @@ Per method for the cached transport, p50 / p95 over every iteration: sequential 
 The sequential p95 over all iterations sits on the cold boundary by construction: 5 of the 100 calls are the first read of each key, and `eth_getLogs` seeds its index with the full 980-block range, which is the 1710 ms maximum. The warm tail is one multicall miss at 206 ms: its refresh was still in flight when the head moved a second block, so the entry fell outside `maxStaleBlocks`. Hit rate was 94% sequential and 100% concurrent. Served answers were at most 1 block behind the newest head the transport knew (p95 1, p50 0).
 
 Upstream HTTP requests a minute, by transport: raw 51 / 126, `hyperevm` default 121 / 128, tuned 370 / 381, router 154 / 219 (sequential / concurrent). The cached transport's requests are the tick (one `eth_blockNumber` a second), the four hot keys refreshed on each new head, and the 4 second probe of every endpoint; with the official RPC budgeted, they went to hypurrscan and drpc almost entirely. That is the trade: three times the uncached transport's load for answers from memory. The raw official run was rate limited on 73% to 85% of calls, as a client without a budget is.
+
+## Direct provider comparison
+
+A separate live run on 2026-10-31 compared `hyperevm()` defaults with direct viem `http()` connections to Hyperliquid, HypurrScan, dRPC, and Stakely. Direct transports used a 10 second timeout and no retries. Each group contained `eth_blockNumber`, a Multicall3 `getCurrentBlockTimestamp` call, the `l1BlockNumber` precompile, a 980-block `eth_getLogs` range filtered to the zero address, and `eth_getBalance`. The phase structure was the same as above: 20 sequential iterations, then 10 iterations of two concurrent groups. Transport order rotated, nothing was pre-seeded, and each transport served 100 calls per phase. Latencies below are p95 milliseconds at the transport's `request`.
+
+| Transport | Sequential p95 | Sequential warm p95 | Concurrent p95 | Concurrent warm p95 | Sequential errors | Concurrent errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `hyperevm()` defaults | 129.35 | 0.17 | 0.10 | 0.10 | 0/100 | 0/100 |
+| Hyperliquid direct | 149.25 | 149.25 | 189.42 | 192.23 | 75/100 | 90/100 |
+| HypurrScan direct | 195.97 | 196.34 | 185.39 | 186.19 | 0/100 | 0/100 |
+| dRPC direct | 218.15 | 222.69 | 224.49 | 224.49 | 20/100 | 20/100 |
+| Stakely direct | 2103.75 | 2318.40 | 1481.79 | 1481.79 | 0/100 | 1/100 |
+
+Warm p95 excludes the first iteration. Direct providers do not cache, so their warm columns describe the same network reads after the first iteration. The concurrent phase started with a warm `hyperevm()` cache.

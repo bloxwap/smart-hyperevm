@@ -23,14 +23,17 @@
 
 ## Performance
 
-One live HyperEVM run compared a direct connection to the official Hyperliquid RPC using viem `http()` with the tuned, cached `hyperevm()` configuration. The workload combined block-number, multicall, precompile, log, and balance reads. Latencies are p95 at the transport's `request`; lower is better.
+One live HyperEVM run compared `hyperevm()` defaults with direct viem `http()` connections to four public RPC providers. The workload combined block-number, multicall, precompile, log, and balance reads. Latencies are p95 at the transport's `request`; lower is better.
 
 | Transport | Sequential, all reads | Sequential, warm reads | Concurrent, mostly warm | Errors (sequential / concurrent) |
 | --- | ---: | ---: | ---: | ---: |
-| Direct official Hyperliquid RPC (`viem http()`) | 375 ms | 375 ms | 144 ms | 73% / 85% |
-| `hyperevm()` tuned + cache | 164 ms | **0.14 ms** | **0.19 ms** | **0% / 0%** |
+| **`hyperevm()` (defaults)** | 129 ms | **0.17 ms** | **0.10 ms** | **0% / 0%** |
+| Hyperliquid (direct) | 149 ms | 149 ms | 189 ms | 75% / 90% |
+| HypurrScan (direct) | 196 ms | 196 ms | 185 ms | 0% / 0% |
+| dRPC (direct) | 218 ms | 223 ms | 224 ms | 20% / 20% |
+| Stakely (direct) | 2,104 ms | 2,318 ms | 1,482 ms | 0% / 1% |
 
-The tuned settings are now the defaults. Cold reads still require the network; the 164 ms sequential p95 includes the initial full log scan. The concurrent phase started with a warm cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. The direct official RPC's errors were rate limiting. See the [full benchmark methodology and results](docs/benchmarks.md#read-cache).
+Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](docs/benchmarks.md#direct-provider-comparison).
 
 ## Installation
 
