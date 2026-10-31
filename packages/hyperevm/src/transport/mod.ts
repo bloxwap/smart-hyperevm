@@ -27,6 +27,7 @@ import {
 import { AllEndpointsFailedError, ChainMismatchError, TimeoutError, TransportClosedError } from "../_errors.ts";
 import { defaultRegistry, registryHttpEndpoints } from "../registry/_registry.ts";
 import { type EndpointUrl, normalizeEndpointUrl } from "../registry/_url.ts";
+import { Activity } from "./_activity.ts";
 import {
   Breaker,
   type BreakerConfig,
@@ -196,6 +197,13 @@ export interface HyperevmTransportOptions {
   perMethod?: boolean | undefined;
   /** Deprioritize endpoints behind the best known head. Default: enabled. */
   headLag?: boolean | HeadLagOptions | undefined;
+  /**
+   * Head probe ticks send nothing while this returns false. Calls still run, on the scores already learned.
+   * Default: in a browser, false while `document.visibilityState` is `"hidden"`; elsewhere always true.
+   * In a browser the page becoming visible runs one probe at once. React Native has no document:
+   * pass `() => AppState.currentState === "active"`. A hook that throws counts as active.
+   */
+  isActive?: (() => boolean) | undefined;
   /** Send a second idempotent read when the first is slower than usual. Default: off. */
   hedge?: boolean | HedgeOptions | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
@@ -851,26 +859,34 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       headLag.enabled && headLag.probeInterval !== false && headLag.probeInterval > 0 ? headLag.probeInterval : 0;
     let probeTimer: ReturnType<typeof setInterval> | undefined;
     let lastRequestAt = 0;
+    const activity = new Activity(options.isActive);
 
     const stopProbes = (): void => {
       if (probeTimer === undefined) return;
       clearInterval(probeTimer);
       probeTimer = undefined;
+      activity.unwatch();
+    };
+
+    const probeTick = (): void => {
+      const idle = headLag.probeIdleTimeout;
+      if (idle !== false && Date.now() - lastRequestAt >= idle) {
+        stopProbes();
+        return;
+      }
+      // An idle check still runs while inactive, so a hidden tab's timer and listener stop on schedule.
+      if (!activity.active()) return;
+      void probe();
     };
 
     // Runs on every request. The timer starts here, so building a client does no timer work or I/O.
     const touch = (): void => {
       lastRequestAt = Date.now();
       if (probeEvery === 0 || probeTimer !== undefined) return;
-      probeTimer = setInterval(() => {
-        const idle = headLag.probeIdleTimeout;
-        if (idle !== false && Date.now() - lastRequestAt >= idle) {
-          stopProbes();
-          return;
-        }
-        void probe();
-      }, probeEvery);
+      probeTimer = setInterval(probeTick, probeEvery);
       unrefTimer(probeTimer);
+      // A page that comes back into view probes at once instead of waiting out the interval.
+      activity.watch(probeTick);
     };
 
     const value: HyperevmTransportValue = {

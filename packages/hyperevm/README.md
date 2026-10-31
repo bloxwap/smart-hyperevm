@@ -118,6 +118,7 @@ const transport = hyperevm({
 - Each endpoint's `eth_chainId` is checked before its first call. An endpoint on another chain is quarantined. Set `verifyChainId: false` to skip the check.
 - An endpoint with 3 consecutive failures, or a `Retry-After`, is ejected for a cooldown (`breaker`). Routing skips it unless every endpoint is ejected.
 - The probe timer starts on the first request and stops after `headLag.probeIdleTimeout` (60 seconds) without one. `transport.value.close()` stops it and rejects later requests with `TransportClosedError`.
+- Probe ticks pause while `isActive()` is false. In a browser that is a hidden tab, and the page becoming visible probes at once. In React Native, pass `isActive: () => AppState.currentState === "active"`.
 - The default registry pool rests on one probe run. Prefer explicit endpoints in a service.
 
 ### Observe
