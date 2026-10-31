@@ -12,6 +12,7 @@ import {
   type HyperevmTransportValue,
   hyperevm,
 } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface Call {
   method: string;
@@ -67,6 +68,7 @@ function open(options: HyperevmTransportOptions & { clock?: { now: number } } = 
   const clock = options.clock ?? { now: START };
   const events: HyperevmEvent[] = [];
   const transport = hyperevm({
+    ...BASELINE,
     routing: "best",
     retryCount: 2,
     hedge: false,
@@ -138,8 +140,8 @@ function logsNode(name: string, head: { value: number }, table: readonly Record<
 }
 
 describe("resolveCache", () => {
-  test("defaults, and off unless set", () => {
-    expect(resolveCache(undefined).enabled).toBe(false);
+  test("defaults, and on unless false", () => {
+    expect(resolveCache(undefined).enabled).toBe(true);
     expect(resolveCache(false).enabled).toBe(false);
     expect(resolveCache(true)).toEqual({
       enabled: true,

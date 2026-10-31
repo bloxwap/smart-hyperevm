@@ -12,6 +12,7 @@ import {
   type ScoreSnapshot,
   hyperevm,
 } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface Call {
   method: string;
@@ -61,6 +62,7 @@ interface Opened {
 
 function open(options: HyperevmTransportOptions): Opened {
   const transport = hyperevm({
+    ...BASELINE,
     routing: "best",
     retryCount: 2,
     hedge: false,

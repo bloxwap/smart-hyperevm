@@ -7,6 +7,7 @@ import {
   type HyperevmEvent,
   type HyperevmTransportOptions,
 } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface RpcBody {
   id: number;
@@ -77,6 +78,7 @@ function mockEndpoint(
 
 function open(options: HyperevmTransportOptions) {
   return hyperevm({
+    ...BASELINE,
     headLag: false,
     routing: "best",
     retryCount: 2,
@@ -177,6 +179,7 @@ describe("re-trying endpoints with backoff", () => {
     const rpc = mockFetch((_url, _body, seen) => (seen === 0 ? { status: 429 } : { result: "0x10" }));
     const events: HyperevmEvent[] = [];
     const client = hyperevm({
+      ...BASELINE,
       endpoints: [A],
       fetchFn: rpc.fetchFn,
       headLag: false,
@@ -577,7 +580,12 @@ describe("backoff rounds", () => {
       return reads === 1 ? { status: 503 } : { result: "0x1" };
     });
     // Default options: chain checks, probes, p2c routing, and the breaker are all on.
-    const client = hyperevm({ endpoints: [A], fetchFn: rpc.fetchFn, onEvent: (event) => events.push(event) })({});
+    const client = hyperevm({
+      ...BASELINE,
+      endpoints: [A],
+      fetchFn: rpc.fetchFn,
+      onEvent: (event) => events.push(event),
+    })({});
     // P gets a 503 from the only endpoint and backs off before trying it again.
     const p = client.request({ method: "eth_call", params: [] }).then(
       () => "served",
@@ -608,6 +616,7 @@ describe("backoff rounds", () => {
       return reads === 1 ? { status: 503 } : { result: "0x1" };
     });
     const client = hyperevm({
+      ...BASELINE,
       endpoints: [{ url: A, label: "a" }],
       fetchFn: rpc.fetchFn,
       headLag: { probeInterval: false },
@@ -799,6 +808,7 @@ describe("in-flight accounting", () => {
       return "0x1";
     });
     const factory = hyperevm({
+      ...BASELINE,
       endpoints: [fast.transport, slow.transport],
       headLag: false,
       routing: "best",
@@ -924,10 +934,10 @@ describe("caller options", () => {
   });
 
   test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("timeout %p is rejected", (timeout) => {
-    expect(() => hyperevm({ endpoints: [A], timeout })({})).toThrow(/positive number of milliseconds/);
+    expect(() => hyperevm({ ...BASELINE, endpoints: [A], timeout })({})).toThrow(/positive number of milliseconds/);
   });
 
   test("an empty endpoints list says so", () => {
-    expect(() => hyperevm({ endpoints: [] })({})).toThrow(/`endpoints` is empty/);
+    expect(() => hyperevm({ ...BASELINE, endpoints: [] })({})).toThrow(/`endpoints` is empty/);
   });
 });

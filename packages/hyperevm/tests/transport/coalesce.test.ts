@@ -3,6 +3,7 @@ import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Tr
 
 import { Coalescer, coalesceKey, isCoalescableMethod } from "../../src/transport/_coalesce.ts";
 import { hyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface Call {
   method: string;
@@ -66,13 +67,9 @@ function flush(): Promise<void> {
 }
 
 function open(options: HyperevmTransportOptions) {
-  return hyperevm({
-    headLag: false,
-    routing: "best",
-    hedge: false,
-    verifyChainId: false,
-    ...options,
-  })({ timeout: options.timeout ?? 1_000 });
+  return hyperevm({ ...BASELINE, headLag: false, routing: "best", hedge: false, verifyChainId: false, ...options })({
+    timeout: options.timeout ?? 1_000,
+  });
 }
 
 function coalesced(events: HyperevmEvent[]): number {
@@ -266,7 +263,7 @@ describe("in-flight coalescing", () => {
   test("separate shared instances do not share requests", async () => {
     const gate = deferred();
     const node = mockEndpoint("node", () => gate.promise);
-    const factory = hyperevm({ endpoints: [node.transport], headLag: false, verifyChainId: false });
+    const factory = hyperevm({ ...BASELINE, endpoints: [node.transport], headLag: false, verifyChainId: false });
     const one = factory({ timeout: 1_000 });
     const two = factory({ timeout: 2_000 });
     const pending = [one.request({ method: "eth_blockNumber" }), two.request({ method: "eth_blockNumber" })];

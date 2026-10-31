@@ -10,6 +10,7 @@ import {
   type ScorePersistence,
   type ScoreSnapshot,
 } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 const START = 10_000_000;
 const HOUR = 3_600_000;
@@ -72,6 +73,7 @@ function instantiate(factory: Transport<"hyperevm", HyperevmTransportValue>): Op
 function open(time: Clock, endpoints: readonly MockEndpoint[], options: HyperevmTransportOptions = {}): Opened {
   return instantiate(
     hyperevm({
+      ...BASELINE,
       endpoints: endpoints.map((endpoint, index) => ({ transport: endpoint.transport, label: `node${index}` })),
       headLag: false,
       routing: "best",
@@ -300,6 +302,7 @@ describe("score snapshots", () => {
     const saved: ScoreSnapshot[] = [];
     const transport = instantiate(
       hyperevm({
+        ...BASELINE,
         endpoints: [
           { url: "https://hyperpc.example.test/evm?apikey=HYPERPC_SECRET", label: "hyperpc" },
           "https://lb.drpc.example.test/ogrpc/hyperliquid/DRPC_SECRET",
@@ -394,6 +397,7 @@ describe("persist", () => {
     const time = clock();
     let loads = 0;
     const factory = hyperevm({
+      ...BASELINE,
       endpoints: [mockEndpoint("a", time, 1).transport],
       headLag: false,
       now: time.now,
@@ -556,6 +560,7 @@ describe("persist", () => {
     const events: HyperevmEvent[] = [];
     let saves = 0;
     const factory = hyperevm({
+      ...BASELINE,
       endpoints: [{ transport: mockEndpoint("a", time, 1).transport, label: "node0" }],
       headLag: false,
       now: time.now,

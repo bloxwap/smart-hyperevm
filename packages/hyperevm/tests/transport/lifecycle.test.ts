@@ -10,6 +10,7 @@ import { hyperEvm } from "viem/chains";
 
 import { AllEndpointsFailedError, TransportClosedError } from "../../src/_errors.ts";
 import { hyperevm, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 const URLS = ["https://a.example.test/evm", "https://b.example.test/evm", "https://c.example.test/evm"] as const;
 
@@ -38,7 +39,14 @@ function mockFetch(): MockFetch {
 }
 
 function factory(fetch: MockFetch, headLag: HyperevmTransportOptions["headLag"]) {
-  return hyperevm({ endpoints: [...URLS], fetchFn: fetch.fetchFn, headLag, hedge: false, routing: "best" });
+  return hyperevm({
+    ...BASELINE,
+    endpoints: [...URLS],
+    fetchFn: fetch.fetchFn,
+    headLag,
+    hedge: false,
+    routing: "best",
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -179,7 +187,10 @@ describe("hyperevm transport lifecycle", () => {
           return "0x10";
         }) as EIP1193RequestFn,
       });
-    const client = createPublicClient({ chain: hyperEvm, transport: hyperevm({ endpoints: [node], headLag: false }) });
+    const client = createPublicClient({
+      chain: hyperEvm,
+      transport: hyperevm({ ...BASELINE, endpoints: [node], headLag: false }),
+    });
     const pending = client.request({ method: "eth_blockNumber" });
     await sleep(10);
     client.transport.close();
@@ -191,6 +202,7 @@ describe("hyperevm transport lifecycle", () => {
   test("attempts and retry waits do not leave listeners on a long-lived signal", async () => {
     const tracked = trackedSignal();
     const client = hyperevm({
+      ...BASELINE,
       endpoints: [failing("first"), failing("second")],
       headLag: false,
       hedge: false,

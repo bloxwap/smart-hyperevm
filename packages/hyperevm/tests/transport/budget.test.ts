@@ -4,6 +4,7 @@ import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Tr
 import { BudgetExhaustedError } from "../../src/_errors.ts";
 import { Budgets, defaultBurst, resolveDefaultBudget, resolveEndpointBudget } from "../../src/transport/_budget.ts";
 import { hyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface MockEndpoint {
   transport: Transport;
@@ -31,6 +32,7 @@ const answers = (method: string): unknown => (method === "eth_chainId" ? "0x3e7"
 
 function open(options: HyperevmTransportOptions, timeout = 1_000) {
   return hyperevm({
+    ...BASELINE,
     headLag: false,
     routing: "best",
     retryCount: 2,
@@ -47,6 +49,19 @@ function sleep(ms: number): Promise<void> {
 function tokens(client: ReturnType<typeof open>): (number | null)[] {
   return (client.value?.snapshot() ?? []).map((entry) => entry.tokens);
 }
+
+describe("known provider limits", () => {
+  const OFFICIAL = "https://rpc.hyperliquid.xyz/evm";
+  const OTHER = "https://other.example.test/evm";
+  const fetchFn = async (): Promise<Response> => new Response("{}", { status: 200 });
+
+  test("the official RPC keeps under its per-IP limit unless the caller sets a budget", () => {
+    expect(tokens(open({ endpoints: [OFFICIAL, OTHER], fetchFn }))).toEqual([3, null]);
+    expect(tokens(open({ endpoints: [OFFICIAL], fetchFn, budget: { rps: 10 } }))).toEqual([20]);
+    expect(tokens(open({ endpoints: [{ url: OFFICIAL, rps: 5 }], fetchFn }))).toEqual([10]);
+    expect(tokens(open({ endpoints: [OFFICIAL], fetchFn, budget: false }))).toEqual([null]);
+  });
+});
 
 describe("budget buckets", () => {
   test("burst defaults to two seconds of rate, and at least one request", () => {
@@ -226,6 +241,7 @@ describe("routing under budgets", () => {
   test("instances one factory builds spend the same buckets", async () => {
     const a = mockEndpoint(answers);
     const factory = hyperevm({
+      ...BASELINE,
       endpoints: [{ transport: a.transport, rps: 0.1, burst: 2 }],
       headLag: false,
       verifyChainId: false,
@@ -286,6 +302,7 @@ describe("every upstream request spends a token", () => {
     const a = mockEndpoint(answers);
     const b = mockEndpoint(answers);
     const client = hyperevm({
+      ...BASELINE,
       endpoints: [
         { transport: a.transport, label: "a", rps: 0.1, burst: 1 },
         { transport: b.transport, label: "b", rps: 0.1, burst: 2 },
@@ -308,6 +325,7 @@ describe("every upstream request spends a token", () => {
   test("a probe whose chain check took the last token does not send eth_blockNumber", async () => {
     const a = mockEndpoint(answers);
     const client = hyperevm({
+      ...BASELINE,
       endpoints: [{ transport: a.transport, rps: 0.1, burst: 1 }],
       headLag: { probeInterval: false },
       now: () => 0,

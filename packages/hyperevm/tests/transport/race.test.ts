@@ -3,6 +3,7 @@ import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Tr
 
 import { AllEndpointsFailedError } from "../../src/_errors.ts";
 import { type HyperevmEvent, type HyperevmTransportOptions, hyperevm } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface MockEndpoint {
   transport: Transport;
@@ -27,6 +28,7 @@ function mockEndpoint(name: string, handler: (method: string) => unknown | Promi
 
 function open(options: HyperevmTransportOptions) {
   return hyperevm({
+    ...BASELINE,
     headLag: false,
     routing: "best",
     retryCount: 2,
@@ -58,14 +60,20 @@ function onChain(read: (method: string) => unknown | Promise<unknown>): (method:
 const reads = (endpoint: MockEndpoint): string[] => endpoint.calls.filter((method) => method !== "eth_chainId");
 
 describe("race option", () => {
-  test("is off by default", async () => {
+  test("races two by default, and false sends each read to one endpoint", async () => {
     const a = mockEndpoint("a", () => "0xa");
     const b = mockEndpoint("b", () => "0xb");
     const events: HyperevmEvent[] = [];
     const client = open({ endpoints: [a.transport, b.transport], race: undefined, onEvent: (e) => events.push(e) });
     expect(await client.request({ method: "eth_call", params: [] })).toBe("0xa");
-    expect(b.calls).toHaveLength(0);
-    expect(events.some((event) => event.type === "race")).toBe(false);
+    expect(b.calls).toHaveLength(1);
+    expect(events.filter((event) => event.type === "race")).toHaveLength(1);
+
+    const c = mockEndpoint("c", () => "0xc");
+    const d = mockEndpoint("d", () => "0xd");
+    const off = open({ endpoints: [c.transport, d.transport], race: false });
+    expect(await off.request({ method: "eth_call", params: [] })).toBe("0xc");
+    expect(d.calls).toHaveLength(0);
   });
 
   test("true races the two best endpoints and returns the first answer", async () => {
@@ -117,7 +125,7 @@ describe("race option", () => {
   });
 
   test.each([1, 0, 2.5, Number.NaN])("width %p throws", (width) => {
-    expect(() => hyperevm({ race: { width } })).toThrow(/race\.width/);
+    expect(() => hyperevm({ ...BASELINE, race: { width } })).toThrow(/race\.width/);
   });
 });
 

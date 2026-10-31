@@ -242,7 +242,7 @@ export interface HyperevmTransportOptions {
   /**
    * Send each idempotent read to the best-scored verified endpoints at once. The first answer wins, and losers
    * finish so their latency is still scored. `true` races 2. Only the first attempt races. A hedge adds to the race.
-   * Default: off, since every raced read costs `width` upstream requests.
+   * Every raced read costs `width` upstream requests. `false` sends each read to one endpoint. Default: on, width 2.
    */
   race?: boolean | RaceOptions | undefined;
   /**
@@ -253,7 +253,7 @@ export interface HyperevmTransportOptions {
    * read. `eth_blockNumber` is answered with the same block unless `blockNumber` is false, and never goes back.
    * HyperCore precompile calls (`0x…0800` to `0x…08ff`) are not pinned: they read current HyperCore state at any
    * block. Some backends answer a state read at a block they have not reached with current state, so pinning
-   * makes `eth_getLogs` consistent there but not those reads. Needs `headLag`. Default: off.
+   * makes `eth_getLogs` consistent there but not those reads. Needs `headLag`. Default: on.
    */
   pinLatest?: boolean | PinLatestOptions | undefined;
   /**
@@ -270,7 +270,7 @@ export interface HyperevmTransportOptions {
    * Recent `eth_getLogs` filters keep an index of the last `logsWindow` blocks, extended by the new blocks only.
    * `eth_blockNumber` is answered from the newest head. Sends, nonces at `"latest"`, gas estimates and prices,
    * filters, subscriptions, and errors are never cached. Needs `headLag`. Best with `pinLatest`, which stamps
-   * each entry with the exact block it was read at. Default: off.
+   * each entry with the exact block it was read at. `false` sends every read upstream. Default: on.
    */
   cache?: boolean | CacheOptions | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
@@ -292,7 +292,8 @@ export interface HyperevmTransportOptions {
    * Request budget for every endpoint without its own `rps`: a token bucket refilled at `rps`, holding `burst`.
    * Every upstream request spends a token, probes and chain checks included. Routing skips a spent endpoint
    * while another has budget. When none does, a call waits for the next token within the 2 second retry budget,
-   * or throws `BudgetExhaustedError`. `false` turns off every budget, per-endpoint ones too. Default: none.
+   * or throws `BudgetExhaustedError`. `false` turns off every budget, per-endpoint ones too. Default: none, except
+   * that the official RPC (`https://rpc.hyperliquid.xyz/evm`) keeps under its per-IP limit at 1.5 rps, burst 3.
    */
   budget?: BudgetOptions | false | undefined;
   /**
@@ -455,6 +456,14 @@ function supportsMethod(
   if (methods.exclude) return !methods.exclude.includes(method);
   return true;
 }
+
+/**
+ * Budgets for providers with a known per-IP limit, used when neither the endpoint nor the transport sets one.
+ * The official RPC allows about 100 requests a minute.
+ */
+const KNOWN_BUDGETS: ReadonlyMap<string, BudgetConfig> = new Map([
+  ["https://rpc.hyperliquid.xyz/evm", { rps: 1.5, burst: 3 }],
+]);
 
 /** Registry weight for a normalized URL. A URL outside the registry weighs 1. */
 function weightFor(url: string, explicit: boolean): number {
@@ -1528,7 +1537,9 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
       instance,
       secrets: secrets.filter((secret): secret is string => secret !== undefined),
       hint,
-      budget: resolveEndpointBudget(config, fallbackBudget, `hyperevm() endpoints[${index}]`),
+      budget:
+        resolveEndpointBudget(config, fallbackBudget, `hyperevm() endpoints[${index}]`) ??
+        (fallbackBudget === false || !url ? undefined : KNOWN_BUDGETS.get(url.url)),
     });
   });
   return pending.map((entry) => {

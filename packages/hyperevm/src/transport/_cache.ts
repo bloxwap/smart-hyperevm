@@ -100,7 +100,7 @@ export interface CacheStats {
 export function resolveCache(value: boolean | CacheOptions | undefined): CacheConfig {
   const options = typeof value === "object" ? value : {};
   const config: CacheConfig = {
-    enabled: value !== undefined && value !== false,
+    enabled: value !== false,
     maxStaleBlocks: options.maxStaleBlocks ?? DEFAULT_CACHE_MAX_STALE_BLOCKS,
     maxAgeMs: options.maxAgeMs ?? DEFAULT_CACHE_MAX_AGE_MS,
     refreshInterval:

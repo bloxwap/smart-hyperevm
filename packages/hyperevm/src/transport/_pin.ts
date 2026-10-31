@@ -73,7 +73,7 @@ export interface PinSource {
 export function resolvePin(value: boolean | PinLatestOptions | undefined): PinConfig {
   const options = typeof value === "object" ? value : {};
   return {
-    enabled: value !== undefined && value !== false,
+    enabled: value !== false,
     freshMs: options.freshMs ?? DEFAULT_PIN_FRESH_MS,
     blockNumber: options.blockNumber ?? true,
   };

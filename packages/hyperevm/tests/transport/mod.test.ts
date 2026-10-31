@@ -11,6 +11,7 @@ import { hyperEvm } from "viem/chains";
 
 import { AllEndpointsFailedError } from "../../src/_errors.ts";
 import { hyperevm, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface MockEndpoint {
   transport: Transport;
@@ -35,6 +36,7 @@ function mockEndpoint(name: string, handler: (method: string) => unknown | Promi
 
 function open(options: HyperevmTransportOptions) {
   return hyperevm({
+    ...BASELINE,
     headLag: false,
     routing: "best",
     retryCount: 2,
@@ -55,11 +57,7 @@ describe("hyperevm transport", () => {
     const endpoint = mockEndpoint("only", (method) => (method === "eth_chainId" ? "0x3e7" : "0x1"));
     const client = createPublicClient({
       chain: hyperEvm,
-      transport: hyperevm({
-        endpoints: [endpoint.transport],
-        headLag: false,
-        routing: "best",
-      }),
+      transport: hyperevm({ ...BASELINE, endpoints: [endpoint.transport], headLag: false, routing: "best" }),
     });
     expect(await client.getChainId()).toBe(999);
     expect(endpoint.calls.map((call) => call.method)).toContain("eth_chainId");
@@ -388,6 +386,7 @@ describe("head trust through viem http", () => {
     return createPublicClient({
       chain: hyperEvm,
       transport: hyperevm({
+        ...BASELINE,
         endpoints: ["https://a.example.test/evm", "https://b.example.test/evm", "https://c.example.test/evm"],
         fetchFn,
         routing,

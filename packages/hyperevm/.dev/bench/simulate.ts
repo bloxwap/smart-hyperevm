@@ -293,6 +293,10 @@ async function runHyperevm(
     retryCount: specs.length - 1,
     // The published tables measure scoring alone. The breaker would eject the dead node after three probes.
     breaker: false,
+    // Racing, pinning, and the cache are off for the same reason: each would change what scoring alone does.
+    race: false,
+    pinLatest: false,
+    cache: false,
     random: mulberry32(0xdecaf),
     now: () => clock.value,
     score,
@@ -392,6 +396,10 @@ async function hedgePass(enabled: boolean): Promise<HedgeSeries> {
     headLag: false,
     routing: "best",
     hedge: enabled ? { minDelay: 40, multiplier: 2 } : false,
+    // The hedge study measures the hedge alone.
+    race: false,
+    pinLatest: false,
+    cache: false,
     retryCount: 1,
     verifyChainId: false,
   })({ timeout: 2_000 });
