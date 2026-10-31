@@ -69,6 +69,16 @@ export interface CacheOptions {
   maxBytes?: number | undefined;
   /** Blocks each log index keeps, from the newest head back. Default: 1000. */
   logsWindow?: number | undefined;
+  /**
+   * Deep-copy answers when they are stored and returned, so callers cannot mutate the cache. `false` shares result
+   * objects and is faster only when every caller treats them as immutable. Default: true.
+   */
+  copyResults?: boolean | undefined;
+  /**
+   * Reuse a cache plan when the same params array is passed again. The array and every nested value must never be
+   * mutated, since identity is what detects reuse. Default: false.
+   */
+  immutableParams?: boolean | undefined;
 }
 
 /** Resolved `cache` settings. */
@@ -82,6 +92,8 @@ export interface CacheConfig {
   maxEntries: number;
   maxBytes: number;
   logsWindow: number;
+  copyResults: boolean;
+  immutableParams: boolean;
 }
 
 /** Counters and sizes, as `value.cacheStats()` reports them. */
@@ -110,6 +122,8 @@ export function resolveCache(value: boolean | CacheOptions | undefined): CacheCo
     maxEntries: options.maxEntries ?? DEFAULT_CACHE_MAX_ENTRIES,
     maxBytes: options.maxBytes ?? DEFAULT_CACHE_MAX_BYTES,
     logsWindow: options.logsWindow ?? DEFAULT_CACHE_LOGS_WINDOW,
+    copyResults: options.copyResults ?? true,
+    immutableParams: options.immutableParams ?? false,
   };
   for (const name of ["maxStaleBlocks", "maxAgeMs", "hotKeys", "hotIdleMs", "maxEntries", "maxBytes"] as const) {
     if (!Number.isFinite(config[name]) || config[name] < 0) {
@@ -250,6 +264,7 @@ interface Log {
   blockNumber: number;
   logIndex: number;
   value: Record<string, unknown>;
+  bytes: number;
 }
 
 interface HotKey {
@@ -272,6 +287,7 @@ export class ReadCache {
   /** Every store in one map. Insertion order is recency. */
   readonly #entries = new Map<string, Entry>();
   readonly #hot = new Map<string, HotKey>();
+  readonly #plans = new WeakMap<object, Map<string, Plan | null>>();
   #bytes = 0;
   #hits = 0;
   #misses = 0;
@@ -288,6 +304,14 @@ export class ReadCache {
   constructor(config: CacheConfig, source: CacheSource) {
     this.#config = config;
     this.#source = source;
+  }
+
+  #plan(method: string, params: unknown): Plan | undefined {
+    return planFor(method, params, this.#config.immutableParams ? this.#plans : undefined);
+  }
+
+  #copy(value: unknown): unknown {
+    return this.#config.copyResults ? copy(value) : value;
   }
 
   stats(): CacheStats {
@@ -314,12 +338,12 @@ export class ReadCache {
 
   /**
    * Answer `method` from memory, or say how to store its upstream answer. Undefined for a call that is never
-   * cached. A hit is a copy, so a caller cannot change what the next one gets. A cacheable `"latest"`,
-   * precompile, or log read becomes a hot key.
+   * cached. Hits are copies unless `copyResults` is false. A cacheable `"latest"`, precompile, or log read
+   * becomes a hot key.
    */
   lookup(method: string, params: unknown, idempotent: boolean): CacheHit | CacheMiss | undefined {
     if (!idempotent || this.#closed) return undefined;
-    const plan = planFor(method, params);
+    const plan = this.#plan(method, params);
     if (!plan) return undefined;
     const now = this.#source.now();
     const hit = this.#serve(plan, now);
@@ -368,33 +392,34 @@ export class ReadCache {
 
   /** The answer for `plan` from memory, with its staleness against the newest head, or undefined. */
   #serve(plan: Plan, now: number): { result: unknown; staleBlocks: number | null } | undefined {
-    const head = this.#source.head(plan.method)?.block;
     switch (plan.kind) {
       case "latest": {
+        const head = this.#source.head(plan.method)?.block;
         const entry = this.#value(plan.key, "latest");
         if (!entry || head === undefined) return undefined;
         if (head - entry.block > this.#config.maxStaleBlocks || now - entry.at > this.#config.maxAgeMs)
           return undefined;
-        return { result: copy(entry.result), staleBlocks: Math.max(0, head - entry.block) };
+        return { result: this.#copy(entry.result), staleBlocks: Math.max(0, head - entry.block) };
       }
       case "timed": {
         const entry = this.#value(plan.key, "timed");
         if (!entry || now - entry.at > this.#config.maxAgeMs) return undefined;
-        return { result: copy(entry.result), staleBlocks: null };
+        return { result: this.#copy(entry.result), staleBlocks: null };
       }
       case "immutable": {
         const entry = this.#value(plan.key, "immutable");
-        return entry ? { result: copy(entry.result), staleBlocks: 0 } : undefined;
+        return entry ? { result: this.#copy(entry.result), staleBlocks: 0 } : undefined;
       }
       case "number": {
         if (plan.block === undefined || plan.exact === undefined) return undefined;
         // The latest answer, when it was read at exactly this block: a caller that pins for itself hits it.
         const latest = this.#value(plan.key, "latest");
-        if (latest && latest.block === plan.block) return { result: copy(latest.result), staleBlocks: 0 };
+        if (latest && latest.block === plan.block) return { result: this.#copy(latest.result), staleBlocks: 0 };
         const entry = this.#value(plan.exact, "immutable");
-        return entry ? { result: copy(entry.result), staleBlocks: 0 } : undefined;
+        return entry ? { result: this.#copy(entry.result), staleBlocks: 0 } : undefined;
       }
       case "logs": {
+        const head = this.#source.head(plan.method)?.block;
         const range = this.#range(plan, head);
         const entry = this.#logs(plan.key);
         if (!range || !entry || range.from < entry.from || range.from > entry.to) return undefined;
@@ -402,7 +427,7 @@ export class ReadCache {
         if (range.to - entry.to > slack) return undefined;
         if (plan.to === "latest" && now - entry.at > this.#config.maxAgeMs) return undefined;
         return {
-          result: selectLogs(entry.logs, range.from, range.to),
+          result: selectLogs(entry.logs, range.from, range.to, this.#config.copyResults),
           staleBlocks: plan.to === "latest" && head !== undefined ? Math.max(0, head - entry.to) : 0,
         };
       }
@@ -420,18 +445,36 @@ export class ReadCache {
         const at = plan.method === "eth_getBlockByNumber" ? blockOf(result) : null;
         const stamped = at ?? block ?? this.#source.held(plan.method);
         if (stamped === undefined) return;
-        this.#set(plan.key, { kind: "latest", result: copy(result), block: stamped, at: now, bytes: sizeOf(result) });
+        this.#set(plan.key, {
+          kind: "latest",
+          result: this.#copy(result),
+          block: stamped,
+          at: now,
+          bytes: sizeOf(result),
+        });
         return;
       }
       case "timed": {
         const head = this.#source.head(plan.method)?.block ?? -1;
-        this.#set(plan.key, { kind: "timed", result: copy(result), block: head, at: now, bytes: sizeOf(result) });
+        this.#set(plan.key, {
+          kind: "timed",
+          result: this.#copy(result),
+          block: head,
+          at: now,
+          bytes: sizeOf(result),
+        });
         return;
       }
       case "immutable": {
         if (plan.method === "eth_getTransactionByHash" && blockOf(result) === null) return;
         const head = this.#source.head(plan.method)?.block ?? -1;
-        this.#set(plan.key, { kind: "immutable", result: copy(result), block: head, at: now, bytes: sizeOf(result) });
+        this.#set(plan.key, {
+          kind: "immutable",
+          result: this.#copy(result),
+          block: head,
+          at: now,
+          bytes: sizeOf(result),
+        });
         return;
       }
       case "number": {
@@ -439,7 +482,7 @@ export class ReadCache {
         if (plan.guard && !this.#holdsAll(plan.method, plan.block)) return;
         this.#set(plan.exact, {
           kind: "immutable",
-          result: copy(result),
+          result: this.#copy(result),
           block: plan.block,
           at: now,
           bytes: sizeOf(result),
@@ -454,7 +497,7 @@ export class ReadCache {
         if (to === undefined || (plan.to !== "latest" && !this.#holdsAll(plan.method, to))) return;
         const from = plan.from === "latest" ? to : plan.from;
         if (from > to) return;
-        const logs = parseLogs(result);
+        const logs = parseLogs(result, this.#config.copyResults);
         if (!logs) return;
         this.#merge(plan.key, from, to, logs, now);
       }
@@ -543,10 +586,10 @@ export class ReadCache {
   /** The params to re-read `plan` with when its entry is behind the newest head or about to expire, else undefined. */
   #stale(plan: Plan, tick: boolean): unknown {
     const now = this.#source.now();
-    const head = this.#source.head(plan.method)?.block;
     const interval = this.#config.refreshInterval === false ? 0 : this.#config.refreshInterval;
     switch (plan.kind) {
       case "latest": {
+        const head = this.#source.head(plan.method)?.block;
         const entry = this.#value(plan.key, "latest");
         if (head === undefined) return undefined;
         // Refresh when behind, or when the entry would expire before the next tick could refresh it.
@@ -556,6 +599,7 @@ export class ReadCache {
       case "timed":
         return tick ? plan.params : undefined;
       case "logs": {
+        const head = this.#source.head(plan.method)?.block;
         const entry = this.#logs(plan.key);
         if (!entry) return plan.params;
         if (head === undefined || entry.to >= head) return undefined;
@@ -568,7 +612,7 @@ export class ReadCache {
 
   /** A background read of `params`, stored on success. Resolves to true when it was stored. */
   async #read(method: string, params: unknown, why: "refresh" | "miss"): Promise<boolean> {
-    const plan = planFor(method, params);
+    const plan = this.#plan(method, params);
     if (!plan) return false;
     if (why === "refresh") {
       this.#refreshes += 1;
@@ -597,22 +641,42 @@ export class ReadCache {
   /** Add logs for `[from, to]` to `key`'s index, replacing it when the ranges do not touch, and trim to the window. */
   #merge(key: string, from: number, to: number, logs: Log[], now: number): void {
     const existing = this.#logs(key);
+    const ordered = inOrder(logs) ? logs : [...logs].sort(byPosition);
     let merged: Log[];
+    let bytes = totalBytes(ordered);
     let low = from;
     let high = to;
-    if (existing && from <= existing.to + 1 && to >= existing.from - 1) {
+    if (existing && from === existing.to + 1) {
+      merged = existing.logs.concat(ordered);
+      bytes += existing.bytes;
+      low = existing.from;
+      high = to;
+    } else if (existing && to === existing.from - 1) {
+      merged = ordered.concat(existing.logs);
+      bytes += existing.bytes;
+      low = from;
+      high = existing.to;
+    } else if (existing && from <= existing.to && to >= existing.from) {
       // Blocks answered again replace what was indexed for them, so a retried range never duplicates a log.
-      merged = existing.logs.filter((log) => log.blockNumber < from || log.blockNumber > to).concat(logs);
+      const retained: Log[] = [];
+      for (const log of existing.logs) {
+        if (log.blockNumber >= from && log.blockNumber <= to) continue;
+        retained.push(log);
+        bytes += log.bytes;
+      }
+      merged = retained.concat(ordered).sort(byPosition);
       low = Math.min(from, existing.from);
       high = Math.max(to, existing.to);
     } else {
-      merged = logs;
+      merged = ordered;
     }
     low = Math.max(low, high - this.#config.logsWindow + 1);
-    const kept = merged.filter((log) => log.blockNumber >= low).sort(byPosition);
-    let bytes = 0;
-    for (const log of kept) bytes += sizeOf(log.value);
-    this.#set(key, { kind: "logs", from: low, to: high, logs: kept, at: now, bytes });
+    const first = firstAtBlock(merged, low);
+    if (first > 0) {
+      for (let index = 0; index < first; index += 1) bytes -= merged[index]?.bytes ?? 0;
+      merged = merged.slice(first);
+    }
+    this.#set(key, { kind: "logs", from: low, to: high, logs: merged, at: now, bytes });
   }
 
   #value(key: string, kind: "latest" | "timed" | "immutable"): ValueEntry | undefined {
@@ -655,7 +719,24 @@ export class ReadCache {
 }
 
 /** A cacheable call's plan, or undefined when the call is never cached. */
-export function planFor(method: string, params: unknown): Plan | undefined {
+export function planFor(
+  method: string,
+  params: unknown,
+  memo: WeakMap<object, Map<string, Plan | null>> | undefined = undefined,
+): Plan | undefined {
+  if (!memo || !Array.isArray(params)) return computePlan(method, params);
+  let methods = memo.get(params);
+  if (!methods) {
+    methods = new Map();
+    memo.set(params, methods);
+  }
+  if (methods.has(method)) return methods.get(method) ?? undefined;
+  const plan = computePlan(method, params);
+  methods.set(method, plan ?? null);
+  return plan;
+}
+
+function computePlan(method: string, params: unknown): Plan | undefined {
   if (method === "eth_chainId") {
     return { kind: "immutable", method, key: "eth_chainId", params: [], guard: false };
   }
@@ -741,34 +822,63 @@ function blockOf(result: unknown): number | null {
   return parseQuantity(field);
 }
 
-function parseLogs(result: readonly unknown[]): Log[] | undefined {
+function parseLogs(result: readonly unknown[], copyResults: boolean): Log[] | undefined {
   const logs: Log[] = [];
   for (const item of result) {
     if (!isRecord(item)) return undefined;
     const blockNumber = parseQuantity(item.blockNumber);
     if (blockNumber === null) return undefined;
+    const value = copyResults ? (copy(item) as Record<string, unknown>) : item;
     logs.push({
       blockNumber,
       logIndex: parseQuantity(item.logIndex) ?? 0,
-      value: copy(item) as Record<string, unknown>,
+      value,
+      bytes: sizeOf(value),
     });
   }
   return logs;
 }
 
-/** Copies of the logs in `[from, to]`, in block then log index order. */
-function selectLogs(logs: readonly Log[], from: number, to: number): Record<string, unknown>[] {
+/** Logs in `[from, to]`, in block then log index order, copied unless the caller opted into shared results. */
+function selectLogs(logs: readonly Log[], from: number, to: number, copyResults: boolean): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
-  for (const log of logs) {
-    if (log.blockNumber < from) continue;
-    if (log.blockNumber > to) break;
-    out.push(copy(log.value) as Record<string, unknown>);
+  for (let index = firstAtBlock(logs, from); index < logs.length; index += 1) {
+    const log = logs[index];
+    if (!log || log.blockNumber > to) break;
+    out.push(copyResults ? (copy(log.value) as Record<string, unknown>) : log.value);
   }
   return out;
 }
 
+/** First log at or after `block`, using the index's block/log-index ordering. */
+function firstAtBlock(logs: readonly Log[], block: number): number {
+  let low = 0;
+  let high = logs.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if ((logs[middle]?.blockNumber ?? block) < block) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 function byPosition(left: Log, right: Log): number {
   return left.blockNumber - right.blockNumber || left.logIndex - right.logIndex;
+}
+
+function inOrder(logs: readonly Log[]): boolean {
+  for (let index = 1; index < logs.length; index += 1) {
+    const previous = logs[index - 1];
+    const current = logs[index];
+    if (previous && current && byPosition(previous, current) > 0) return false;
+  }
+  return true;
+}
+
+function totalBytes(logs: readonly Log[]): number {
+  let bytes = 0;
+  for (const log of logs) bytes += log.bytes;
+  return bytes;
 }
 
 /** A deep copy of JSON data with every hex string lower-cased, so spellings of one address or word share a key. */

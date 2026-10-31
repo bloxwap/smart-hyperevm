@@ -137,7 +137,7 @@ HyperCore read precompile calls (`0x…0800` to `0x…08ff`) read current HyperC
 
 Never cached: sends and everything in [What is not retried](#what-is-not-retried) or `nonIdempotentMethods`, `eth_getTransactionCount` at `"latest"` or `"pending"` (a stale nonce breaks the next send), `eth_estimateGas`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`, `eth_feeHistory`, the filter methods, subscriptions, any read at `"pending"`, `"safe"`, `"finalized"`, or `"earliest"`, and errors. A revert is not kept either: it costs no more than a success to re-read, and a cached error object would be thrown to several callers at once.
 
-A hit returns a deep copy, and a stored answer is a deep copy, so a caller that changes what it got cannot change what the next caller gets. Entries are bounded by `maxEntries` (default 1000) and about `maxBytes` (default 8 MiB), least recently used first out. Each `hyperevm()` instance has its own cache, so factories with different endpoints or chains never share one.
+By default, a hit returns a deep copy and a stored answer is a deep copy, so a caller that changes what it got cannot change what the next caller gets. With `copyResults: false`, answers are stored and returned as shared objects instead; every caller must treat them as immutable. With `immutableParams: true`, the cache reuses a plan when it sees the same params array again, avoiding normalization and key construction; the array and every nested value must never be mutated, since identity is what detects reuse. Entries are bounded by `maxEntries` (default 1000) and about `maxBytes` (default 8 MiB), least recently used first out. Each `hyperevm()` instance has its own cache, so factories with different endpoints or chains never share one.
 
 ### Hot keys and refresh
 
@@ -182,7 +182,7 @@ Racing, pinning, coalescing, budgets, warm start, the activity pause, and the re
 | `budget: { rps, burst } \| false`, endpoint `{ rps, burst }` | official RPC 1.5 rps, burst 3; others none. `burst` is `max(1, ceil(rps * 2))` | [Request budgets](#request-budgets) |
 | `persist: { load, save, maxAge, saveInterval }` | off. `maxAge` 1 hour, `saveInterval` 10 seconds | [Warm start](#warm-start) |
 | `isActive: () => boolean` | false only in a hidden browser tab | [Inactive pages and apps](#inactive-pages-and-apps) |
-| `cache: boolean \| { maxStaleBlocks, maxAgeMs, refreshInterval, hotKeys, hotIdleMs, maxEntries, maxBytes, logsWindow }` | on. `maxStaleBlocks` 1, `maxAgeMs` 2000, `refreshInterval` 1000, `hotKeys` 64, `hotIdleMs` 30000, `maxEntries` 1000, `maxBytes` 8 MiB, `logsWindow` 1000 | [Read cache](#read-cache) |
+| `cache: boolean \| { maxStaleBlocks, maxAgeMs, refreshInterval, hotKeys, hotIdleMs, maxEntries, maxBytes, logsWindow, copyResults, immutableParams }` | on. `maxStaleBlocks` 1, `maxAgeMs` 2000, `refreshInterval` 1000, `hotKeys` 64, `hotIdleMs` 30000, `maxEntries` 1000, `maxBytes` 8 MiB, `logsWindow` 1000, `copyResults` true, `immutableParams` false | [Read cache](#read-cache) |
 
 ## Registry score
 

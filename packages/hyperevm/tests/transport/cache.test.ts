@@ -153,6 +153,8 @@ describe("resolveCache", () => {
       maxEntries: 1_000,
       maxBytes: 8 * 1024 * 1024,
       logsWindow: 1_000,
+      copyResults: true,
+      immutableParams: false,
     });
     expect(resolveCache({ maxStaleBlocks: 0, refreshInterval: false }).maxStaleBlocks).toBe(0);
   });
@@ -204,6 +206,15 @@ describe("planFor", () => {
     });
     expect(planFor("eth_getLogs", [{ blockHash: HASH }])?.kind).toBe("immutable");
   });
+
+  test("an explicit memo reuses plans only for the same params array", () => {
+    const memo: NonNullable<Parameters<typeof planFor>[2]> = new WeakMap();
+    const params = [TX];
+    const first = planFor("eth_call", params, memo);
+    expect(planFor("eth_call", params, memo)).toBe(first);
+    expect(planFor("eth_call", [TX], memo)).not.toBe(first);
+    expect(planFor("eth_getBalance", params, memo)).not.toBe(first);
+  });
 });
 
 describe("latest reads", () => {
@@ -229,6 +240,20 @@ describe("latest reads", () => {
       { outcome: "hit", staleBlocks: 0 },
       { outcome: "hit", staleBlocks: 0 },
     ]);
+  });
+
+  test("copyResults false shares results, with immutable params reused by identity", async () => {
+    const a = node("a", { value: 100 }, () => ({ nested: { n: 1 } }));
+    const client = open({
+      endpoints: [{ transport: a.transport, label: "a" }],
+      cache: { copyResults: false, immutableParams: true, refreshInterval: false },
+    });
+    await client.value.probe();
+    const params = [TX];
+    const first = await client.request({ method: "eth_call", params });
+    expect(await client.request({ method: "eth_call", params })).toBe(first);
+    expect(a.count("eth_call")).toBe(1);
+    expect(client.value.cacheStats()).toMatchObject({ hits: 1, misses: 1 });
   });
 
   test("served within maxStaleBlocks of the newest head, and not past it", async () => {
@@ -569,6 +594,46 @@ describe("eth_getLogs index", () => {
       params: [{ address: ADDRESS, fromBlock: hex(95), toBlock: hex(100) }],
     });
     expect(a.count("eth_getLogs")).toBe(2);
+  });
+
+  test("an adjacent earlier range prepends without disturbing log order", async () => {
+    const a = logsNode("a", { value: 100 }, TABLE);
+    const client = open({ endpoints: [{ transport: a.transport, label: "a" }], isActive: () => false });
+    await client.value.probe();
+    await client.request({
+      method: "eth_getLogs",
+      params: [{ address: ADDRESS, fromBlock: hex(90), toBlock: hex(100) }],
+    });
+    await client.request({
+      method: "eth_getLogs",
+      params: [{ address: ADDRESS, fromBlock: hex(80), toBlock: hex(89) }],
+    });
+    expect(
+      await client.request({
+        method: "eth_getLogs",
+        params: [{ address: ADDRESS, fromBlock: hex(80), toBlock: hex(100) }],
+      }),
+    ).toEqual([log(80, 0), log(95, 0), log(100, 0), log(100, 1)]);
+    expect(a.count("eth_getLogs")).toBe(2);
+  });
+
+  test("a disjoint range replaces the index instead of bridging an unfetched gap", async () => {
+    const a = logsNode("a", { value: 110 }, [...TABLE, log(110, 0)]);
+    const client = open({ endpoints: [{ transport: a.transport, label: "a" }], isActive: () => false });
+    await client.value.probe();
+    await client.request({
+      method: "eth_getLogs",
+      params: [{ address: ADDRESS, fromBlock: hex(90), toBlock: hex(100) }],
+    });
+    await client.request({
+      method: "eth_getLogs",
+      params: [{ address: ADDRESS, fromBlock: hex(110), toBlock: hex(110) }],
+    });
+    await client.request({
+      method: "eth_getLogs",
+      params: [{ address: ADDRESS, fromBlock: hex(95), toBlock: hex(100) }],
+    });
+    expect(a.count("eth_getLogs")).toBe(3);
   });
 
   test("a filter by block hash is kept for good", async () => {

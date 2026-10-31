@@ -270,7 +270,9 @@ export interface HyperevmTransportOptions {
    * Recent `eth_getLogs` filters keep an index of the last `logsWindow` blocks, extended by the new blocks only.
    * `eth_blockNumber` is answered from the newest head. Sends, nonces at `"latest"`, gas estimates and prices,
    * filters, subscriptions, and errors are never cached. Needs `headLag`. Best with `pinLatest`, which stamps
-   * each entry with the exact block it was read at. `false` sends every read upstream. Default: on.
+   * each entry with the exact block it was read at. `copyResults: false` shares answers with callers that never
+   * mutate them; `immutableParams: true` reuses plans for params arrays that are never mutated. `false` sends every
+   * read upstream. Default: on.
    */
   cache?: boolean | CacheOptions | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
@@ -1302,7 +1304,9 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
             // The pin's block first, so a number returned here is one the next pinned read is served at, then the
             // cache's newest head, lowered the same way. Each caller raises the shared upstream answer on its own,
             // so a joined call never sees a lower block.
-            const local = pin.blockNumber() ?? cache?.blockNumber();
+            const pinned = pin.blockNumber();
+            if (pinned !== undefined) return pinned;
+            const local = cache?.blockNumber();
             if (local !== undefined) return pin.answersBlockNumber ? pin.observe(local) : local;
             const upstream = await sendShared(method, params, signal, idempotent, rebroadcast, NO_BAR);
             return pin.answersBlockNumber ? pin.observe(upstream) : upstream;
