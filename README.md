@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/bloxwap/hyperevm?style=flat-square"></a>
-  <img alt="not published to npm" src="https://img.shields.io/badge/npm-not%20published-lightgrey?style=flat-square">
+  <a href="https://www.npmjs.com/package/@bloxwap/hyperevm"><img alt="npm" src="https://img.shields.io/npm/v/@bloxwap/hyperevm?style=flat-square"></a>
 </p>
 
 ## Features

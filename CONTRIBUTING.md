@@ -2,7 +2,7 @@
 
 Issues and small fixes are welcome. Please open an issue before starting a large change.
 
-This package is not published. Do not cut an npm release. Publishing `@bloxwap/hyperevm` needs Joe's approval.
+`@bloxwap/hyperevm` is published to npm. A release needs Joe's approval: bump `version` in `packages/hyperevm/package.json`, then run `npm publish` from `packages/hyperevm`. `prepublishOnly` typechecks, tests, and builds `dist/` (ESM bundles plus declarations) first. Tag the release commit `vX.Y.Z`.
 
 ## Development
 
