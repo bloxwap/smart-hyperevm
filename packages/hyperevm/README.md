@@ -10,18 +10,17 @@
 
 ## Features
 
-- **Adaptive RPC routing**: Scores endpoints by per-method latency, tail latency, errors, in-flight load, and block-head lag, then routes each read to the best available nodes.
-- **Parallel racing and failover**: Races the two best-scored endpoints, supports timed hedging, and fails over on network errors and rate limits. Circuit breakers and request budgets keep unhealthy or exhausted endpoints out of rotation.
-- **Sub-millisecond warm reads**: Caches recent and immutable reads, refreshes hot keys in the background on new blocks, and answers `eth_blockNumber` locally when a fresh head is known.
-- **Incremental log indexing**: Keeps a rolling 1,000-block `eth_getLogs` index and fetches only new blocks after the initial scan. Binary search and incremental merges keep lookups and updates cheap.
-- **Consistent multi-node reads**: Pins `"latest"` to a block every selected endpoint holds, preventing block mismatches when consecutive reads use different nodes.
-- **Efficient request handling**: Coalesces identical in-flight reads, supports viem HTTP batching, and memoizes cache plans and routing views to reduce CPU work.
-- **Warm start and lifecycle controls**: Restores previous endpoint scores, pauses background work in hidden tabs, and stops timers when idle or closed.
-- **Typed**: Source code is 100% TypeScript.
-- **Tested**: Offline unit tests run in CI.
-- **Minimal dependencies**: viem is a peer. The package has no runtime dependencies of its own.
-- **Cross-environment support**: Compatible with Bun, Node.js, browsers, and edge runtimes that provide `fetch`.
-- **Easy integration**: A drop-in viem `Transport` for `createPublicClient`.
+| Feature | Value |
+| --- | --- |
+| Adaptive routing | Routes by per-method latency, errors, load, and block lag. |
+| Racing & failover | Parallel reads, hedging, retries, circuit breakers, and rate-limit budgets. |
+| Warm cache | Sub-millisecond reads, background refresh, and local block numbers. |
+| Incremental logs | Rolling 1,000-block index; fetches only new blocks. |
+| Consistent reads | Pins `"latest"` across endpoints. |
+| Request efficiency | Coalescing, HTTP batching, and memoized hot paths. |
+| Lifecycle | Saved scores, hidden-tab pause, and idle shutdown. |
+| Integration | TypeScript, drop-in viem transport, and offline CI tests. |
+| Runtimes | Bun, Node.js, browsers, and edge; no runtime dependencies beyond peer viem. |
 
 ## Performance
 
