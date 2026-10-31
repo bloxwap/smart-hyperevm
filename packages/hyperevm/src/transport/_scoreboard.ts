@@ -62,6 +62,8 @@ export interface ScoreboardOptions {
 export class Scoreboard {
   readonly #endpoints: EndpointState[];
   readonly #options: ScoreboardOptions;
+  /** Books seeded from a stored snapshot, with when they were measured. The first live sample replaces one. */
+  readonly #priors = new WeakMap<MethodStat, number>();
 
   constructor(endpoints: readonly ScoreboardEndpoint[], options: ScoreboardOptions) {
     this.#endpoints = endpoints.map((endpoint) => ({
@@ -123,8 +125,8 @@ export class Scoreboard {
       observeLiveness(endpoint.global, true, 0, config);
       return;
     }
-    observe(endpoint.global, latencyMs, true, config);
-    observe(this.#method(endpoint, method), latencyMs, true, config);
+    observe(this.#live(endpoint.global), latencyMs, true, config);
+    observe(this.#live(this.#method(endpoint, method)), latencyMs, true, config);
   }
 
   failure(id: string, method: string, latencyMs: number, sampleLatency: boolean, penaltyMs: number): void {
@@ -135,8 +137,31 @@ export class Scoreboard {
       observeLiveness(this.#method(endpoint, method), false, penaltyMs, config);
       return;
     }
-    observe(endpoint.global, latencyMs, false, config);
-    observe(this.#method(endpoint, method), latencyMs, false, config);
+    observe(this.#live(endpoint.global), latencyMs, false, config);
+    observe(this.#live(this.#method(endpoint, method)), latencyMs, false, config);
+  }
+
+  /**
+   * Seed an unmeasured book with a stored one measured at `at`. `method` `"*"` is the endpoint's global book.
+   * False when the endpoint is unknown or the book already holds samples: live samples always win.
+   */
+  seed(id: string, method: string, stat: MethodStat, at: number): boolean {
+    const endpoint = this.#endpoints.find((item) => item.id === id);
+    if (!endpoint) return false;
+    const book = method === "*" ? endpoint.global : this.#method(endpoint, method);
+    if (book.n > 0) return false;
+    Object.assign(book, copyStat(stat));
+    this.#priors.set(book, at);
+    return true;
+  }
+
+  /** Every book with samples. `at` is set on a seeded book no live sample has replaced yet. */
+  books(): { id: string; method: string; stat: MethodStat; at: number | undefined }[] {
+    return this.#endpoints.flatMap((endpoint) =>
+      [["*", endpoint.global] as const, ...endpoint.methods]
+        .filter(([, stat]) => stat.n > 0)
+        .map(([method, stat]) => ({ id: endpoint.id, method, stat: copyStat(stat), at: this.#priors.get(stat) })),
+    );
   }
 
   /**
@@ -195,6 +220,12 @@ export class Scoreboard {
     const created = emptyStat();
     endpoint.methods.set(method, created);
     return created;
+  }
+
+  /** `stat`, emptied first when it is a seeded prior, so the first live sample replaces it instead of mixing in. */
+  #live(stat: MethodStat): MethodStat {
+    if (this.#priors.delete(stat)) Object.assign(stat, emptyStat());
+    return stat;
   }
 
   #score(endpoint: EndpointState, method: string): number {

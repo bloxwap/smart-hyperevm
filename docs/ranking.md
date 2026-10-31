@@ -63,6 +63,16 @@ Each endpoint is tried once before any is tried again. Once every eligible endpo
 
 Hedging is off unless you set `hedge`. When it is on, an idempotent read that is still running after `max(minDelay, multiplier * tail)` is copied to the next endpoint. The first success wins. Cancelling the loser does not count as an error. Hedges never go to an ejected endpoint. A backup that has not passed its chain check is checked first, then hedged if the read is still running, so hedging works with probes off.
 
+## Warm start
+
+A new instance starts cold: every endpoint scores as `priorMs` until it answers. `value.scores()` returns what the instance has learned as versioned JSON (`version: 1`, `savedAt`, and each endpoint's books by label and method, with `"*"` for the global book). `value.restoreScores(snapshot)` seeds a new instance from it. Heads, breaker state, and chain checks are never saved, so a new session probes heads, re-checks `eth_chainId` before an endpoint's first call, and starts with every circuit closed.
+
+A restored book is a prior. It fills only a book with no samples, counts as at most two samples, so its score blends back toward `priorMs` and it never sets a hedge delay, and the endpoint's first live sample replaces it instead of mixing in. A probe moves its error and tail like any book, but does not replace it. A book saved again before a live sample replaced it keeps the time it was first measured, so it still ages out.
+
+Storage is untrusted. Restore accepts a snapshot or its JSON (at most 256 KiB), ignores unknown endpoint labels, method names that are not identifiers, more than 32 books per endpoint, books with a missing or non-finite field, and snapshots or books older than `maxAge` (default 1 hour) or more than a minute in the future. Latencies are clamped to the instance's `timeout`, error rates to 0 to 1.
+
+`persist: { load, save }` does this for you. `load` runs once, on the instance's first request, so building a client at module scope on Workers does no I/O. A load that returns synchronously, or a promise that has already settled, seeds the first pick. A slower one lands when it settles and never delays or fails a call. `save` runs at most every `saveInterval` (default 10 seconds) on an unref'd timer, and on `close()`. Nothing is saved until the load settles, so a slow load cannot be overwritten by an empty snapshot. A load or save that throws or rejects, or a stored value that is not a snapshot, fires a `persist` event. `localStoragePersistence(key)` uses `globalThis.localStorage`, and loads and saves nothing where it is missing or blocked (Workers, Node, React Native, private modes). Snapshots carry labels, never key-bearing URLs.
+
 ## Registry score
 
 `packages/hyperevm/.dev/rank.ts` fetches the source lists, merges them with `packages/hyperevm/registry/nodes.json`, probes every HTTP URL, appends the observations to `packages/hyperevm/registry/history.json`, and writes ranks back. The workflow `.github/workflows/rank-registry.yml` runs that weekly and on demand, then opens a pull request. It does not push to `main`.
@@ -110,6 +120,7 @@ URLs with a query string, a username, or a hash are rejected. `http://` is rejec
 - Hedge defaults off. A stall study is in [benchmarks.md](benchmarks.md). The cold hedge fires at `minDelay` (250ms), and several public nodes are slower than that, so those first calls would be duplicated.
 - The shipped history starts with one probe run. Full weight waits for the window above, so every endpoint in the first ranked file is on the new-node cap. The shipped file predates the precompile and range probes, so it reflects them only after the next `bun run rank`. Production services should pass explicit endpoints.
 - Snapshots do not show ejection state. Watch the `eject` and `restore` events.
+- A browser tab that closes without `close()` loses up to `saveInterval` of learning. Save `value.scores()` yourself on `pagehide`. `close()` saves too, but a page restored from the back-forward cache would find the transport closed. Instances of one factory with different timeouts share a `persist` store, and the last one to save wins.
 - `close()` does not close a child `webSocket()` transport's socket or cancel calls in flight.
 - Filters are not pinned to the node that made them. `eth_new*Filter` goes to one endpoint and is never retried, but a later `eth_getFilterChanges` may be routed elsewhere and answer "filter not found". Poll with `eth_getLogs` instead. viem's `fallback` has the same gap.
 - One factory shares an instance per `timeout`, `retryCount`, and chain, and keeps it until `close()`. Clients built with a different timeout per request each get their own instance. Fix those options when the factory is created.

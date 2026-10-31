@@ -119,6 +119,7 @@ const transport = hyperevm({
 - An endpoint with 3 consecutive failures, or a `Retry-After`, is ejected for a cooldown (`breaker`). Routing skips it unless every endpoint is ejected.
 - The probe timer starts on the first request and stops after `headLag.probeIdleTimeout` (60 seconds) without one. `transport.value.close()` stops it and rejects later requests with `TransportClosedError`.
 - The default registry pool rests on one probe run. Prefer explicit endpoints in a service.
+- `persist: localStoragePersistence("hyperevm:scores")` warm-starts a browser client from the last session's scores. Pass your own `{ load, save }` for other storage. Restored scores are priors that live samples replace. Heads, ejections, and chain checks are never saved. `value.scores()` and `value.restoreScores()` do the same by hand.
 
 ### Observe
 

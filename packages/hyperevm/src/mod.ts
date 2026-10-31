@@ -57,6 +57,7 @@ export {
   inflation,
   isIdempotentMethod,
   isRebroadcastMethod,
+  localStoragePersistence,
   parseQuantity,
   shouldFailover,
   type BatchOptions,
@@ -70,5 +71,8 @@ export {
   type HyperevmTransportOptions,
   type HyperevmTransportValue,
   type MethodStat,
+  type ScoreBook,
   type ScoreConfig,
+  type ScorePersistence,
+  type ScoreSnapshot,
 } from "./transport/mod.ts";
