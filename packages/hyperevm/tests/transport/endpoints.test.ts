@@ -16,6 +16,7 @@ import { hyperEvm } from "viem/chains";
 import { ChainMismatchError, TimeoutError } from "../../src/_errors.ts";
 import { normalizeRpcUrl } from "../../src/registry/_url.ts";
 import { hyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 const HYPERPC = "https://hyperpc.example.test/evm?apikey=HYPERPC_SECRET";
 const DRPC = "https://lb.drpc.example.test/ogrpc/hyperliquid/DRPC_SECRET";
@@ -80,7 +81,9 @@ function chainOf(id: string): (method: string) => string {
 }
 
 function open(options: HyperevmTransportOptions, timeout = 1_000) {
-  return hyperevm({ headLag: false, routing: "best", hedge: false, retryCount: 2, ...options })({ timeout });
+  return hyperevm({ ...BASELINE, headLag: false, routing: "best", hedge: false, retryCount: 2, ...options })({
+    timeout,
+  });
 }
 
 /**
@@ -124,6 +127,7 @@ describe("explicit endpoints that carry keys", () => {
     const seen: Seen[] = [];
     const events: HyperevmEvent[] = [];
     const transport = hyperevm({
+      ...BASELINE,
       endpoints: [HYPERPC, DRPC, PUBLIC],
       fetchFn: rpcFetch(healthy, seen),
       headLag: { probeInterval: false },
@@ -462,7 +466,7 @@ describe("endpoint list validation", () => {
 describe("option resolution", () => {
   test("options.timeout wins over the client timeout", async () => {
     const hung = mockEndpoint("hung", (method) => (method === "eth_chainId" ? "0x3e7" : new Promise(() => {})));
-    const client = hyperevm({ endpoints: [hung.transport], timeout: 30, retryCount: 0, headLag: false })({
+    const client = hyperevm({ ...BASELINE, endpoints: [hung.transport], timeout: 30, retryCount: 0, headLag: false })({
       timeout: 60_000,
     });
     expect(client.config.timeout).toBe(30);
@@ -601,7 +605,7 @@ describe("chain id verification", () => {
     const testnet = mockEndpoint("testnet", chainOf("0x3e6"));
     const client = createPublicClient({
       chain: { ...hyperEvm, id: 998 },
-      transport: hyperevm({ endpoints: [testnet.transport], headLag: false }),
+      transport: hyperevm({ ...BASELINE, endpoints: [testnet.transport], headLag: false }),
     });
     expect(await client.getBlockNumber()).toBe(1n);
   });

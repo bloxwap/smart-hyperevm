@@ -73,7 +73,7 @@ export interface PinSource {
 export function resolvePin(value: boolean | PinLatestOptions | undefined): PinConfig {
   const options = typeof value === "object" ? value : {};
   return {
-    enabled: value !== undefined && value !== false,
+    enabled: value !== false,
     freshMs: options.freshMs ?? DEFAULT_PIN_FRESH_MS,
     blockNumber: options.blockNumber ?? true,
   };
@@ -119,7 +119,8 @@ export function pinParams(method: string, params: unknown, block: number): unkno
 /** HyperCore read precompiles live at `0x0000…0800` through `0x0000…08ff` and ignore the block tag. */
 const PRECOMPILE_ADDRESS = /^0x0{37}8[0-9a-f]{2}$/i;
 
-function isPrecompileCall(call: unknown): boolean {
+/** True when `call` (an `eth_call` params[0]) targets a HyperCore read precompile. */
+export function isPrecompileCall(call: unknown): boolean {
   if (typeof call !== "object" || call === null || !("to" in call)) return false;
   return typeof call.to === "string" && PRECOMPILE_ADDRESS.test(call.to);
 }
@@ -159,7 +160,19 @@ export interface PinnedParams {
   readonly params: unknown;
   /** Undefined when nothing was pinned. Every endpoint may then serve the call. */
   readonly holders: ReadonlySet<string> | undefined;
+  /** The block `"latest"` was pinned to. Undefined when nothing was pinned. */
+  readonly block: number | undefined;
 }
+
+/** How {@link LatestPin.target} chooses the block. */
+export interface TargetOptions {
+  /** Require a head seen in the last `freshMs`. Default: true. */
+  fresh?: boolean | undefined;
+  /** Pin to the highest head instead of the floor, so only the endpoints at the tip serve. Default: false. */
+  top?: boolean | undefined;
+}
+
+const UNPINNED = (params: unknown): PinnedParams => ({ params, holders: undefined, block: undefined });
 
 /** Per-instance pinning. Holds one number: the highest `eth_blockNumber` it has returned. */
 export class LatestPin {
@@ -183,10 +196,12 @@ export class LatestPin {
    * least one must be fresh. Heads more than `maxLag` behind the highest are left out: that endpoint is scored
    * down already, and waiting on it would pin state several blocks old. It is left out of the read too.
    * The block is the lowest head left, raised to the last `eth_blockNumber` returned while an endpoint holds that.
+   * With `top`, it is the highest head itself, and only the endpoints at it hold it. The read cache pins its
+   * background reads there, so what it serves is as new as the newest head the transport knows.
    */
-  target(method: string): PinTarget | null {
+  target(method: string, options: TargetOptions = {}): PinTarget | null {
     const readings: HeadReading[] = [];
-    let fresh = false;
+    let fresh = options.fresh === false;
     let top: number | null = null;
     for (const reading of this.#source.heads(Number.POSITIVE_INFINITY)) {
       if (!reading.trusted || !this.#source.servable(reading.id, method)) continue;
@@ -198,7 +213,7 @@ export class LatestPin {
     const cutoff = top - this.#source.maxLag;
     let floor = top;
     for (const reading of readings) if (reading.head >= cutoff && reading.head < floor) floor = reading.head;
-    const block = this.#served > floor && this.#served <= top ? this.#served : floor;
+    const block = options.top === true ? top : this.#served > floor && this.#served <= top ? this.#served : floor;
     const holders = new Set<string>();
     for (const reading of readings) if (reading.head >= block) holders.add(reading.id);
     return { block, holders };
@@ -206,12 +221,25 @@ export class LatestPin {
 
   /** `params` with `"latest"` pinned for an idempotent read while a target exists, and who may serve it. */
   pin(method: string, params: unknown, idempotent: boolean): PinnedParams {
-    if (!this.#config.enabled || !idempotent) return { params, holders: undefined };
-    if (method !== "eth_getLogs" && !BLOCK_SLOTS.has(method)) return { params, holders: undefined };
-    const target = this.target(method);
-    if (target === null) return { params, holders: undefined };
+    if (!this.#config.enabled || !idempotent) return UNPINNED(params);
+    return this.#pinAt(method, params, {});
+  }
+
+  /**
+   * `params` pinned to the highest head, for the read cache's own refreshes, whether or not `pinLatest` is on:
+   * a cache entry is stamped with the block it was read at, so the read must name one. The head need not be fresh,
+   * since the cache only refreshes once a newer head is known.
+   */
+  pinTop(method: string, params: unknown): PinnedParams {
+    return this.#pinAt(method, params, { top: true, fresh: false });
+  }
+
+  #pinAt(method: string, params: unknown, options: TargetOptions): PinnedParams {
+    if (method !== "eth_getLogs" && !BLOCK_SLOTS.has(method)) return UNPINNED(params);
+    const target = this.target(method, options);
+    if (target === null) return UNPINNED(params);
     const pinned = pinParams(method, params, target.block);
-    return pinned === params ? { params, holders: undefined } : { params: pinned, holders: target.holders };
+    return pinned === params ? UNPINNED(params) : { params: pinned, holders: target.holders, block: target.block };
   }
 
   /** The local `eth_blockNumber` answer, or undefined when it must go upstream. */

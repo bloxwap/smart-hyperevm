@@ -64,6 +64,8 @@ export interface ScoreboardOptions {
 export class Scoreboard {
   readonly #endpoints: EndpointState[];
   readonly #options: ScoreboardOptions;
+  #headRevision = 0;
+  #headView: { revision: number; at: number; value: HeadView } | undefined;
   /** Books seeded from a stored snapshot, with when they were measured. The first live sample replaces one. */
   readonly #priors = new WeakMap<MethodStat, number>();
 
@@ -181,6 +183,7 @@ export class Scoreboard {
     const now = this.#options.now();
     endpoint.head = head;
     endpoint.headAt = now;
+    this.#headRevision += 1;
     const view = this.#heads(now);
     const best = view.best ?? head;
     return { best, lag: Math.max(0, best - head), trusted: view.best !== null && !view.liars.has(endpoint) };
@@ -310,6 +313,8 @@ export class Scoreboard {
    * With three or more the majority wins, so a leader is ignored only when most of the others agree it is too far ahead.
    */
   #heads(now: number): HeadView {
+    const cached = this.#headView;
+    if (cached?.revision === this.#headRevision && cached.at === now) return cached.value;
     const fresh: HeadSample[] = [];
     for (const endpoint of this.#endpoints) {
       if (endpoint.head === null) continue;
@@ -322,13 +327,19 @@ export class Scoreboard {
       const anchor = peerMedian(sample, fresh);
       if (anchor !== null && sample.head > anchor + maxAhead) liars.add(sample.endpoint);
     }
-    if (fresh.length === 2 && liars.size > 0) return { best: null, liars: new Set() };
+    if (fresh.length === 2 && liars.size > 0) {
+      const value = { best: null, liars: new Set<EndpointState>() };
+      this.#headView = { revision: this.#headRevision, at: now, value };
+      return value;
+    }
     let best: number | null = null;
     for (const sample of fresh) {
       if (liars.has(sample.endpoint)) continue;
       if (best === null || sample.head > best) best = sample.head;
     }
-    return { best, liars };
+    const value = { best, liars };
+    this.#headView = { revision: this.#headRevision, at: now, value };
+    return value;
   }
 
   #better(left: EndpointState, right: EndpointState, method: string): EndpointState {

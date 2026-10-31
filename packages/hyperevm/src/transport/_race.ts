@@ -35,10 +35,10 @@ export interface RacePool<T extends { readonly id: string }> {
   verify: (endpoint: T) => void;
 }
 
-/** Racers after the lead, or 0 when `race` is off. */
+/** Racers after the lead, or 0 when `race` is off. Undefined races `DEFAULT_RACE_WIDTH`. */
 export function resolveRace(value: boolean | RaceOptions | undefined): number {
-  if (!value) return 0;
-  const width = value === true ? DEFAULT_RACE_WIDTH : (value.width ?? DEFAULT_RACE_WIDTH);
+  if (value === false) return 0;
+  const width = typeof value === "object" ? (value.width ?? DEFAULT_RACE_WIDTH) : DEFAULT_RACE_WIDTH;
   if (!Number.isInteger(width) || width < 2) {
     throw new Error(`hyperevm() race.width must be an integer of at least 2, got ${width}.`);
   }

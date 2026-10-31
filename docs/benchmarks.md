@@ -91,3 +91,31 @@ One pass from this environment on 2026-10-31, twelve calls each, every eligible 
 | `hyperevm` | 83ms | 291ms | 0 | 0 | 0 |
 
 `fallback` stayed on the first registry row, which was healthy. `hyperevm` spent its first calls sampling other rows, and that is the whole of the p95 gap. Twelve calls on one machine is not a ranking. The tables above are the numbers CI will reproduce.
+
+## Read cache
+
+A temporary script in the papertrade monorepo sent papertrade's read mix through four transports from this environment on 2026-10-31: raw viem `http()` to the official RPC, `hyperevm()` with defaults, `hyperevm()` tuned (`race: { width: 2 }`, `pinLatest: true`, `cache: true`, and an official-RPC budget of 1.5 rps with a burst of 3), and the monorepo router (`new Router(clientUpstreams())` behind `hyperEvmRouterTransport`). The tuned settings are now the defaults, so "defaults" in this run is what `race: false, pinLatest: false, cache: false` gives today. Each group is five calls: `eth_blockNumber`, an `eth_call` multicall of five Exchange views, an `eth_call` to the `l1BlockNumber` precompile at `0x…0809`, `eth_getLogs` for the BatchExecutor's `CallExecuted` topic from `head - 979` to `"latest"`, and `eth_getBalance`. The head is the group's own `eth_blockNumber` answer, as in papertrade. Phase 1 ran 20 iterations of one group per transport, at least 2 seconds apart, transport order rotating. Phase 2 ran 10 iterations of two groups at once per transport. Nothing was pre-seeded: the first iteration is cold for every transport, and the cache was not told the workload. The two phases ran back to back, so the cache was warm when phase 2 started. Latencies are milliseconds at the transport's `request`.
+
+Sequential, 20 iterations (118 seconds: the uncached transports' log scans ran past the pace):
+
+| Transport | p50 | p95 | p99 | max | warm p50 | warm p95 | warm p99 | warm max | errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| raw official | 127 | 375 | 595 | 4783 | 127 | 375 | 4783 | 4783 | 73/100 |
+| `hyperevm` default | 213 | 3164 | 4846 | 5980 | 210 | 3866 | 5980 | 5980 | 0/100 |
+| `hyperevm` tuned, cached | 0.05 | 164 | 337 | 1710 | 0.05 | 0.14 | 206 | 206 | 0/100 |
+| router | 128 | 617 | 842 | 886 | 127 | 688 | 886 | 886 | 3/100 |
+
+Concurrent, 10 iterations of two groups (48 seconds):
+
+| Transport | p50 | p95 | p99 | max | warm p50 | warm p95 | warm p99 | warm max | errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| raw official | 124 | 144 | 236 | 358 | 124 | 144 | 358 | 358 | 85/100 |
+| `hyperevm` default | 205 | 2815 | 3072 | 3072 | 211 | 2326 | 3021 | 3021 | 0/100 |
+| `hyperevm` tuned, cached | 0.01 | 0.19 | 0.21 | 0.22 | 0.02 | 0.19 | 0.22 | 0.22 | 0/100 |
+| router | 125 | 740 | 798 | 798 | 125 | 740 | 798 | 798 | 2/100 |
+
+Per method for the cached transport, p50 / p95 over every iteration: sequential `eth_blockNumber` 0.05 / 0.27, multicall 0.05 / 206, precompile 0.01 / 0.08, `eth_getLogs` 0.11 / 0.48, `eth_getBalance` 0.01 / 0.03; concurrent 0.03 / 0.08, 0.02 / 0.08, 0.01 / 0.01, 0.09 / 0.21, 0.01 / 0.02. The uncached transports' tail is `eth_getLogs`: a 980-block scan takes 2 to 6 seconds on hypurrscan and stakely, and 0.5 to 0.9 seconds through the router.
+
+The sequential p95 over all iterations sits on the cold boundary by construction: 5 of the 100 calls are the first read of each key, and `eth_getLogs` seeds its index with the full 980-block range, which is the 1710 ms maximum. The warm tail is one multicall miss at 206 ms: its refresh was still in flight when the head moved a second block, so the entry fell outside `maxStaleBlocks`. Hit rate was 94% sequential and 100% concurrent. Served answers were at most 1 block behind the newest head the transport knew (p95 1, p50 0).
+
+Upstream HTTP requests a minute, by transport: raw 51 / 126, `hyperevm` default 121 / 128, tuned 370 / 381, router 154 / 219 (sequential / concurrent). The cached transport's requests are the tick (one `eth_blockNumber` a second), the four hot keys refreshed on each new head, and the 4 second probe of every endpoint; with the official RPC budgeted, they went to hypurrscan and drpc almost entirely. That is the trade: three times the uncached transport's load for answers from memory. The raw official run was rate limited on 73% to 85% of calls, as a client without a budget is.

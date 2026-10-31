@@ -12,6 +12,7 @@ import {
   type ScoreSnapshot,
   hyperevm,
 } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface Call {
   method: string;
@@ -61,6 +62,7 @@ interface Opened {
 
 function open(options: HyperevmTransportOptions): Opened {
   const transport = hyperevm({
+    ...BASELINE,
     routing: "best",
     retryCount: 2,
     hedge: false,
@@ -322,6 +324,77 @@ describe("inactive probes + budgets", () => {
     const after = b.count("eth_blockNumber");
     await sleep(30);
     expect(b.count("eth_blockNumber")).toBe(after);
+  });
+});
+
+describe("cache + race + pinLatest + budget", () => {
+  test("a hit sends nothing and spends no token; the miss before it is raced and pinned like any read", async () => {
+    const events: HyperevmEvent[] = [];
+    const a = node("a", 100);
+    const b = node("b", 100);
+    const client = open({
+      endpoints: [
+        { transport: a.transport, label: "a" },
+        { transport: b.transport, label: "b" },
+      ],
+      race: true,
+      pinLatest: true,
+      cache: { refreshInterval: false },
+      budget: { rps: 1, burst: 10 },
+      onEvent: (event) => events.push(event),
+    });
+    await client.value.probe();
+    expect(tokens(client)).toEqual({ a: 9, b: 9 });
+
+    expect(await client.request({ method: "eth_call", params: [TX] })).toBe("0x1");
+    expect(races(events)).toHaveLength(1);
+    expect(a.reads()).toEqual([{ method: "eth_call", params: [TX, "0x64"] }]);
+    expect(tokens(client)).toEqual({ a: 8, b: 8 });
+
+    expect(await client.request({ method: "eth_call", params: [TX, "latest"] })).toBe("0x1");
+    expect(races(events)).toHaveLength(1);
+    expect(tokens(client)).toEqual({ a: 8, b: 8 });
+    expect(events.filter((event) => event.type === "coalesce")).toHaveLength(0);
+    expect(client.value.cacheStats()).toMatchObject({ hits: 1, misses: 1 });
+    // eth_blockNumber is still the pin's answer.
+    expect(await client.request({ method: "eth_blockNumber" })).toBe("0x64");
+    expect(tokens(client)).toEqual({ a: 8, b: 8 });
+  });
+
+  test("a refresh spends one token on one holder of the newest head, and the read after it is a hit", async () => {
+    const events: HyperevmEvent[] = [];
+    const a = node("a", 100);
+    const b = node("b", 101);
+    const client = open({
+      endpoints: [
+        { transport: a.transport, label: "a" },
+        { transport: b.transport, label: "b" },
+      ],
+      race: true,
+      pinLatest: true,
+      cache: { refreshInterval: false },
+      budget: { rps: 1, burst: 4 },
+      onEvent: (event) => events.push(event),
+    });
+    await client.value.probe();
+    // The read races both at the floor, 100.
+    await client.request({ method: "eth_call", params: [TX] });
+    expect(tokens(client)).toEqual({ a: 2, b: 2 });
+    expect(a.reads()).toEqual([{ method: "eth_call", params: [TX, "0x64"] }]);
+
+    // Heads noted again: the hot key is a block behind the top, so it is refreshed there, on b alone, unraced.
+    await client.value.probe();
+    await until(() => b.count("eth_call") === 2);
+    await sleep(5);
+    expect(b.reads().at(-1)).toEqual({ method: "eth_call", params: [TX, "0x65"] });
+    expect(a.count("eth_call")).toBe(1);
+    expect(tokens(client)).toEqual({ a: 1, b: 0 });
+    expect(races(events)).toHaveLength(1);
+    expect(client.value.cacheStats()).toMatchObject({ refreshes: 1, hits: 0, misses: 1 });
+
+    expect(await client.request({ method: "eth_call", params: [TX, "latest"] })).toBe("0x1");
+    expect(tokens(client)).toEqual({ a: 1, b: 0 });
+    expect(client.value.cacheStats()).toMatchObject({ hits: 1 });
   });
 });
 

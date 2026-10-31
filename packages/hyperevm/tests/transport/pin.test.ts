@@ -3,6 +3,7 @@ import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Tr
 
 import { pinParams, resolvePin } from "../../src/transport/_pin.ts";
 import { type HyperevmEvent, type HyperevmTransportOptions, hyperevm } from "../../src/transport/mod.ts";
+import { BASELINE } from "./_baseline.ts";
 
 interface Call {
   method: string;
@@ -54,6 +55,7 @@ function hex(block: number): string {
 
 function open(options: HyperevmTransportOptions) {
   const client = hyperevm({
+    ...BASELINE,
     routing: "best",
     retryCount: 2,
     hedge: false,
@@ -147,8 +149,8 @@ describe("pinParams", () => {
     expect(pinParams("eth_getLogs", pending, 100)).toBe(pending);
   });
 
-  test("defaults: off, a 1 second freshness window, and eth_blockNumber answered once on", () => {
-    expect(resolvePin(undefined)).toEqual({ enabled: false, freshMs: 1_000, blockNumber: true });
+  test("defaults: on, a 1 second freshness window, and eth_blockNumber answered", () => {
+    expect(resolvePin(undefined)).toEqual({ enabled: true, freshMs: 1_000, blockNumber: true });
     expect(resolvePin(false).enabled).toBe(false);
     expect(resolvePin(true)).toEqual({ enabled: true, freshMs: 1_000, blockNumber: true });
     expect(resolvePin({ freshMs: 2_500, blockNumber: false })).toEqual({
@@ -160,9 +162,19 @@ describe("pinParams", () => {
 });
 
 describe("pinLatest", () => {
-  test("is off by default", async () => {
+  test("is on by default", async () => {
     const a = node("a", { value: 102 });
     const client = open({ endpoints: [a.transport], pinLatest: undefined, now: () => 0 });
+    await client.value.probe();
+    await client.request({ method: "eth_call", params: [TX, "latest"] });
+    expect(await client.request({ method: "eth_blockNumber" })).toBe("0x66");
+    expect(a.reads()).toEqual([{ method: "eth_call", params: [TX, "0x66"] }]);
+    expect(a.calls.filter((call) => call.method === "eth_blockNumber")).toHaveLength(1);
+  });
+
+  test("false passes latest through and sends eth_blockNumber upstream", async () => {
+    const a = node("a", { value: 102 });
+    const client = open({ endpoints: [a.transport], pinLatest: false, now: () => 0 });
     await client.value.probe();
     await client.request({ method: "eth_call", params: [TX, "latest"] });
     expect(await client.request({ method: "eth_blockNumber" })).toBe("0x66");
