@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   isAlreadyKnownError,
+  isBlockNotHeldError,
   isIdempotentMethod,
   isRebroadcastMethod,
   shouldFailover,
@@ -53,17 +54,41 @@ describe("method safety", () => {
     ];
     for (const message of limits)
       expect(shouldFailover(Object.assign(new Error(message), { code: -32602 }))).toBe(true);
-    const invalid = [
-      "invalid argument 0: hex string without 0x prefix",
-      "missing value for required argument 0",
-      "invalid block range params",
-    ];
+    const invalid = ["invalid argument 0: hex string without 0x prefix", "missing value for required argument 0"];
     for (const message of invalid)
       expect(shouldFailover(Object.assign(new Error(message), { code: -32602 }))).toBe(false);
     // A revert stays terminal even when its reason mentions a limit.
     expect(shouldFailover(Object.assign(new Error("execution reverted: limit exceeded"), { code: -32602 }))).toBe(
       false,
     );
+  });
+
+  test("a block the endpoint has not reached fails over, and is not an endpoint failure", () => {
+    const notHeld: [string, number][] = [
+      // The official HyperEVM RPC, for eth_getLogs past its head.
+      ["invalid block range", -32602],
+      ["invalid block range params", -32602],
+      ["header not found", -32000],
+      ["unknown block", -32000],
+      ["block range extends beyond current head block", -32000],
+    ];
+    for (const [message, code] of notHeld) {
+      const error = Object.assign(new Error(message), { code });
+      expect([message, shouldFailover(error), isBlockNotHeldError(error)]).toEqual([message, true, true]);
+    }
+    // viem keeps the node's message in `details`.
+    const wrapped = Object.assign(new Error("Invalid parameters were provided to the RPC method."), {
+      code: -32602,
+      details: "invalid block range",
+    });
+    expect(isBlockNotHeldError(wrapped)).toBe(true);
+    for (const message of [
+      "socket hang up",
+      "execution reverted",
+      "invalid argument 0: hex string without 0x prefix",
+    ]) {
+      expect(isBlockNotHeldError(new Error(message))).toBe(false);
+    }
   });
 
   test("node verdicts on a transaction are terminal", () => {

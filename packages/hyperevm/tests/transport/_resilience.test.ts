@@ -408,7 +408,8 @@ describe("chain checks under concurrency", () => {
         return method === "eth_chainId" ? "0x3e7" : "0x1";
       });
     const nodes = [node("a"), node("b"), node("c")];
-    const client = open({ endpoints: nodes.map((item) => item.transport), verifyChainId: true });
+    // Coalescing is off so that twelve identical reads each need an endpoint.
+    const client = open({ endpoints: nodes.map((item) => item.transport), verifyChainId: true, coalesce: false });
     await Promise.all(Array.from({ length: 12 }, () => client.request({ method: "eth_call", params: [] })));
     const reads = nodes.map((item) => item.calls.filter((call) => call.method === "eth_call").length);
     expect(reads.reduce((sum, count) => sum + count, 0)).toBe(12);
@@ -611,6 +612,8 @@ describe("backoff rounds", () => {
       fetchFn: rpc.fetchFn,
       headLag: { probeInterval: false },
       onEvent: (event) => events.push(event),
+      // Each identical call must reach an endpoint on its own, so coalescing is off.
+      coalesce: false,
     })({});
     // P gets a 503 and backs off. Q asks for 1 second, so P waits that out too.
     const p = client.request({ method: "eth_call", params: [] }).then(
@@ -754,6 +757,8 @@ describe("backoff rounds", () => {
     const client = open({
       endpoints: [...item.others.map((name) => others[name]), victim],
       onEvent: (event) => events.push(event),
+      // Each identical call must reach an endpoint on its own, so coalescing is off.
+      coalesce: false,
       ...item.options,
     });
     if (item.options.verifyChainId) {

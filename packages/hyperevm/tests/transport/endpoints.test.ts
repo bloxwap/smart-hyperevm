@@ -535,7 +535,8 @@ describe("chain id verification", () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       return method === "eth_chainId" ? "0x3e7" : "0x1";
     });
-    const client = open({ endpoints: [node.transport] });
+    // Coalescing is off so that eight calls wait on the check, not one.
+    const client = open({ endpoints: [node.transport], coalesce: false });
     await Promise.all(Array.from({ length: 8 }, () => client.request({ method: "eth_blockNumber" })));
     await client.request({ method: "eth_blockNumber" });
     expect(node.calls.filter((method) => method === "eth_chainId")).toHaveLength(1);

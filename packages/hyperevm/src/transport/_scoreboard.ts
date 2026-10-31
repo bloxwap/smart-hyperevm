@@ -56,12 +56,16 @@ export interface ScoreboardOptions {
   now: () => number;
   /** Ejected endpoints. `pick` skips them unless every candidate is ejected. */
   ejected?: ((id: string) => boolean) | undefined;
+  /** Endpoints out of request budget. `pick` skips them unless every candidate in the same breaker state is. */
+  spent?: ((id: string) => boolean) | undefined;
 }
 
 /** Picks an endpoint and records what happened after the call. */
 export class Scoreboard {
   readonly #endpoints: EndpointState[];
   readonly #options: ScoreboardOptions;
+  /** Books seeded from a stored snapshot, with when they were measured. The first live sample replaces one. */
+  readonly #priors = new WeakMap<MethodStat, number>();
 
   constructor(endpoints: readonly ScoreboardEndpoint[], options: ScoreboardOptions) {
     this.#endpoints = endpoints.map((endpoint) => ({
@@ -75,7 +79,10 @@ export class Scoreboard {
     this.#options = options;
   }
 
-  /** Lowest score, or the better of two randomly drawn endpoints. Ejected endpoints are a last resort. */
+  /**
+   * Lowest score, or the better of two randomly drawn endpoints. Ejected endpoints are a last resort.
+   * Spent endpoints come after funded ones of the same breaker state, never before a closed one.
+   */
   pick(
     method: string,
     exclude: ReadonlySet<string>,
@@ -85,7 +92,10 @@ export class Scoreboard {
     const eligible = this.#endpoints.filter((endpoint) => !exclude.has(endpoint.id) && endpoint.supports(method));
     const ejected = this.#options.ejected;
     const closed = ejected ? eligible.filter((endpoint) => !ejected(endpoint.id)) : eligible;
-    const candidates = closed.length > 0 ? closed : eligible;
+    const pool = closed.length > 0 ? closed : eligible;
+    const spent = this.#options.spent;
+    const funded = spent ? pool.filter((endpoint) => !spent(endpoint.id)) : pool;
+    const candidates = funded.length > 0 ? funded : pool;
     const chosen =
       candidates.length === 0
         ? undefined
@@ -123,8 +133,8 @@ export class Scoreboard {
       observeLiveness(endpoint.global, true, 0, config);
       return;
     }
-    observe(endpoint.global, latencyMs, true, config);
-    observe(this.#method(endpoint, method), latencyMs, true, config);
+    observe(this.#live(endpoint.global), latencyMs, true, config);
+    observe(this.#live(this.#method(endpoint, method)), latencyMs, true, config);
   }
 
   failure(id: string, method: string, latencyMs: number, sampleLatency: boolean, penaltyMs: number): void {
@@ -135,8 +145,31 @@ export class Scoreboard {
       observeLiveness(this.#method(endpoint, method), false, penaltyMs, config);
       return;
     }
-    observe(endpoint.global, latencyMs, false, config);
-    observe(this.#method(endpoint, method), latencyMs, false, config);
+    observe(this.#live(endpoint.global), latencyMs, false, config);
+    observe(this.#live(this.#method(endpoint, method)), latencyMs, false, config);
+  }
+
+  /**
+   * Seed an unmeasured book with a stored one measured at `at`. `method` `"*"` is the endpoint's global book.
+   * False when the endpoint is unknown or the book already holds samples: live samples always win.
+   */
+  seed(id: string, method: string, stat: MethodStat, at: number): boolean {
+    const endpoint = this.#endpoints.find((item) => item.id === id);
+    if (!endpoint) return false;
+    const book = method === "*" ? endpoint.global : this.#method(endpoint, method);
+    if (book.n > 0) return false;
+    Object.assign(book, copyStat(stat));
+    this.#priors.set(book, at);
+    return true;
+  }
+
+  /** Every book with samples. `at` is set on a seeded book no live sample has replaced yet. */
+  books(): { id: string; method: string; stat: MethodStat; at: number | undefined }[] {
+    return this.#endpoints.flatMap((endpoint) =>
+      [["*", endpoint.global] as const, ...endpoint.methods]
+        .filter(([, stat]) => stat.n > 0)
+        .map(([method, stat]) => ({ id: endpoint.id, method, stat: copyStat(stat), at: this.#priors.get(stat) })),
+    );
   }
 
   /**
@@ -154,6 +187,27 @@ export class Scoreboard {
   }
 
   /**
+   * Heads seen in the last `maxAgeMs`, capped at `staleMs`, with how long ago each was seen. `trusted` is false
+   * when no reference is believed or the head is ignored as implausible, as on the `head` event.
+   */
+  heads(maxAgeMs: number): { id: string; head: number; ageMs: number; trusted: boolean }[] {
+    const now = this.#options.now();
+    const view = this.#heads(now);
+    const maxAge = Math.min(maxAgeMs, this.#options.staleMs);
+    const readings: { id: string; head: number; ageMs: number; trusted: boolean }[] = [];
+    for (const endpoint of this.#endpoints) {
+      if (endpoint.head === null || now - endpoint.headAt > maxAge) continue;
+      readings.push({
+        id: endpoint.id,
+        head: endpoint.head,
+        ageMs: Math.max(0, now - endpoint.headAt),
+        trusted: view.best !== null && !view.liars.has(endpoint),
+      });
+    }
+    return readings;
+  }
+
+  /**
    * How long to wait before cloning an idempotent read.
    * Cold endpoints use `minDelay`. After a few samples, wait until the call is slower than `multiplier` times the tail.
    */
@@ -166,7 +220,7 @@ export class Scoreboard {
     return scaled > minDelay ? scaled : minDelay;
   }
 
-  snapshot(method: string): Omit<EndpointSnapshot, "quarantined">[] {
+  snapshot(method: string): Omit<EndpointSnapshot, "quarantined" | "tokens">[] {
     const view = this.#heads(this.#options.now());
     return this.#endpoints.map((endpoint) => ({
       id: endpoint.id,
@@ -195,6 +249,12 @@ export class Scoreboard {
     const created = emptyStat();
     endpoint.methods.set(method, created);
     return created;
+  }
+
+  /** `stat`, emptied first when it is a seeded prior, so the first live sample replaces it instead of mixing in. */
+  #live(stat: MethodStat): MethodStat {
+    if (this.#priors.delete(stat)) Object.assign(stat, emptyStat());
+    return stat;
   }
 
   #score(endpoint: EndpointState, method: string): number {

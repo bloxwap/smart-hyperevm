@@ -24,9 +24,16 @@ import {
   type Transport,
 } from "viem";
 
-import { AllEndpointsFailedError, ChainMismatchError, TimeoutError, TransportClosedError } from "../_errors.ts";
+import {
+  AllEndpointsFailedError,
+  BudgetExhaustedError,
+  ChainMismatchError,
+  TimeoutError,
+  TransportClosedError,
+} from "../_errors.ts";
 import { defaultRegistry, registryHttpEndpoints } from "../registry/_registry.ts";
 import { type EndpointUrl, normalizeEndpointUrl } from "../registry/_url.ts";
+import { Activity } from "./_activity.ts";
 import {
   Breaker,
   type BreakerConfig,
@@ -35,15 +42,26 @@ import {
   DEFAULT_BREAKER_THRESHOLD,
   retryAfterMs,
 } from "./_breaker.ts";
+import {
+  type BudgetConfig,
+  type BudgetOptions,
+  Budgets,
+  resolveDefaultBudget,
+  resolveEndpointBudget,
+} from "./_budget.ts";
+import { Coalescer, coalesceKey, isCoalescableMethod } from "./_coalesce.ts";
 import type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
 import {
   isAbortError,
   isAlreadyKnownError,
+  isBlockNotHeldError,
   isIdempotentMethod,
   isRebroadcastMethod,
   shouldFailover,
   toError,
 } from "./_methods.ts";
+import { LatestPin, type PinLatestOptions, resolvePin } from "./_pin.ts";
+import { type RaceOptions, pickRacers, raceCalls, resolveRace } from "./_race.ts";
 import { type ScoreConfig, defaultScoreConfig } from "./_score.ts";
 import {
   DEFAULT_MAX_AHEAD,
@@ -52,7 +70,9 @@ import {
   blockNumberFromResult,
   parseQuantity,
 } from "./_scoreboard.ts";
+import { type ScorePersistence, type ScoreSnapshot, WarmStart } from "./_warmstart.ts";
 
+export type { BudgetOptions } from "./_budget.ts";
 export type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
 export {
   NON_IDEMPOTENT_METHODS,
@@ -61,8 +81,16 @@ export {
   isRebroadcastMethod,
   shouldFailover,
 } from "./_methods.ts";
+export type { PinLatestOptions } from "./_pin.ts";
+export type { RaceOptions } from "./_race.ts";
 export { blockNumberFromResult, parseQuantity } from "./_scoreboard.ts";
 export { defaultScoreConfig, endpointScore, inflation, type MethodStat, type ScoreConfig } from "./_score.ts";
+export {
+  localStoragePersistence,
+  type ScoreBook,
+  type ScorePersistence,
+  type ScoreSnapshot,
+} from "./_warmstart.ts";
 
 /** How long a head sample stays usable for lag penalties. */
 const DEFAULT_STALE_MS = 30_000;
@@ -146,6 +174,10 @@ export interface HyperevmEndpointConfig {
   label?: string | undefined;
   /** Routing weight above 0. Default: the registry weight, or 1. */
   weight?: number | undefined;
+  /** Sustained requests per second this endpoint allows. Replaces the transport `budget`. Default: that budget. */
+  rps?: number | undefined;
+  /** Bucket size for `rps`, at least 1. Default: `max(1, ceil(rps * 2))`. */
+  burst?: number | undefined;
 }
 
 /** A URL, a viem transport, or an {@link HyperevmEndpointConfig}. */
@@ -196,8 +228,38 @@ export interface HyperevmTransportOptions {
   perMethod?: boolean | undefined;
   /** Deprioritize endpoints behind the best known head. Default: enabled. */
   headLag?: boolean | HeadLagOptions | undefined;
+  /**
+   * Head probe ticks send nothing while this returns false. Calls still run, on the scores already learned.
+   * Default: in a browser, false while `document.visibilityState` is `"hidden"`; elsewhere always true.
+   * In a browser the page becoming visible runs one probe at once. React Native has no document:
+   * pass `() => AppState.currentState === "active"`. A hook that throws counts as active.
+   */
+  isActive?: (() => boolean) | undefined;
   /** Send a second idempotent read when the first is slower than usual. Default: off. */
   hedge?: boolean | HedgeOptions | undefined;
+  /**
+   * Send each idempotent read to the best-scored verified endpoints at once. The first answer wins, and losers
+   * finish so their latency is still scored. `true` races 2. Only the first attempt races. A hedge adds to the race.
+   * Default: off, since every raced read costs `width` upstream requests.
+   */
+  race?: boolean | RaceOptions | undefined;
+  /**
+   * Rewrite `"latest"`, given or implied, on idempotent reads to one block, and send the read only to endpoints
+   * known to hold it. The block is the lowest trusted head among verified, open endpoints within `maxLag` of the
+   * highest, raised to the last `eth_blockNumber` returned. A head counts however old it is, but one must be from
+   * the last `freshMs`, or the tag passes through. An endpoint with no head or a lower one does not serve the
+   * read. `eth_blockNumber` is answered with the same block unless `blockNumber` is false, and never goes back.
+   * HyperCore precompile calls (`0x…0800` to `0x…08ff`) are not pinned: they read current HyperCore state at any
+   * block. Some backends answer a state read at a block they have not reached with current state, so pinning
+   * makes `eth_getLogs` consistent there but not those reads. Needs `headLag`. Default: off.
+   */
+  pinLatest?: boolean | PinLatestOptions | undefined;
+  /**
+   * Identical concurrent idempotent reads (same method and params) share one upstream request, and every caller
+   * gets its result or error. Nothing is kept after it settles. Sends, non-idempotent methods, subscriptions, and
+   * filters never share. Default: true.
+   */
+  coalesce?: boolean | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
   routing?: "best" | "p2c" | undefined;
   /** Extra methods that must not be retried or hedged. */
@@ -214,12 +276,25 @@ export interface HyperevmTransportOptions {
    */
   breaker?: boolean | BreakerOptions | undefined;
   /**
+   * Request budget for every endpoint without its own `rps`: a token bucket refilled at `rps`, holding `burst`.
+   * Every upstream request spends a token, probes and chain checks included. Routing skips a spent endpoint
+   * while another has budget. When none does, a call waits for the next token within the 2 second retry budget,
+   * or throws `BudgetExhaustedError`. `false` turns off every budget, per-endpoint ones too. Default: none.
+   */
+  budget?: BudgetOptions | false | undefined;
+  /**
    * Return true to stop failover, matching viem `fallback`'s `shouldThrow`.
    * Terminal errors (reverts, invalid params, aborts) already stop failover.
    */
   shouldThrow?: ((error: Error) => boolean) | undefined;
   /** Called for routing events. Exceptions are swallowed. */
   onEvent?: ((event: HyperevmEvent) => void) | undefined;
+  /**
+   * Warm-start scores from storage. `load` runs once, on the instance's first request, and `save` runs at most every
+   * `saveInterval` and on `close()`. A load still pending at the first pick lands later, so it never delays or fails
+   * a call. Load and save errors fire a `persist` event. Use {@link localStoragePersistence} in a browser. Default: off.
+   */
+  persist?: ScorePersistence | undefined;
   /** Overrides for the latency score. Defaults live in {@link defaultScoreConfig}. */
   score?: Partial<ScoreConfig> | undefined;
   /** Clock used for latency samples. Tests inject this. */
@@ -234,6 +309,18 @@ export interface HyperevmTransportValue {
   onEvent: (listener: (event: HyperevmEvent) => void) => () => void;
   /** Current scores, heads, and in-flight counts. `score` is for `method`. Default: `"eth_call"`. */
   snapshot: (method?: string) => readonly EndpointSnapshot[];
+  /**
+   * Learned latency, tail, and error books by endpoint label, as JSON to store. Heads, breaker state, and chain
+   * checks are left out, so a new session re-establishes them.
+   */
+  scores: () => ScoreSnapshot;
+  /**
+   * Seed books that have no samples yet from a {@link ScoreSnapshot} or its JSON, which may come from untrusted storage.
+   * Unknown endpoints, invalid books, and books older than `persist.maxAge` are ignored, and values are clamped.
+   * A seeded book counts as at most two samples, and the endpoint's first live sample replaces it.
+   * True when a book was seeded.
+   */
+  restoreScores: (snapshot: unknown) => boolean;
   /** Endpoints this transport was built with. `id` and `url` are the public label. */
   endpoints: readonly { id: string; url: string; weight: number }[];
   /**
@@ -277,6 +364,8 @@ interface BuiltEndpoint {
   supports: (method: string) => boolean;
   /** Milliseconds a recent rate-limited HTTP response asked for in `Retry-After`. Reading it clears it. */
   retryAfter: () => number;
+  /** Undefined when the endpoint is unlimited. */
+  budget: BudgetConfig | undefined;
 }
 
 interface Inflight {
@@ -370,6 +459,11 @@ function abortError(signal: AbortSignal): Error {
 
 const unlinked = (): void => undefined;
 
+const noProgress = (): void => undefined;
+
+/** A call every endpoint may serve. */
+const NO_BAR: ReadonlySet<string> = new Set();
+
 /** Forwards an abort from `signal` to `controller`. Returns a function that removes the listener from `signal`. */
 function linkAbort(controller: AbortController, signal: AbortSignal | undefined): () => void {
   if (!signal) return unlinked;
@@ -408,6 +502,7 @@ function sharedKey(timeout: number, retryCount: number, chain: Chain | undefined
 export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyperevm", HyperevmTransportValue> {
   const headLag = resolveHeadLag(options.headLag);
   const hedge = resolveHedge(options.hedge);
+  const raceRivals = resolveRace(options.race);
   const routing = options.routing ?? "p2c";
   const perMethod = options.perMethod ?? true;
   const now = options.now ?? ((): number => Date.now());
@@ -418,6 +513,10 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
   const shared = new Map<string, ReturnType<Transport<"hyperevm", HyperevmTransportValue>>>();
   const rebroadcastRaw = options.rebroadcastRawTransactions ?? true;
   const breakerConfig = resolveBreaker(options.breaker);
+  const pinConfig = resolvePin(options.pinLatest);
+  const coalesce = options.coalesce ?? true;
+  // Per factory, not per instance: clients with another timeout still spend the same provider limit.
+  const budgets = new Budgets(now);
 
   return (parameters: {
     account?: unknown;
@@ -446,6 +545,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           : "hyperevm() requires at least one endpoint. `endpoints` is empty.",
       );
     }
+    for (const endpoint of built) budgets.configure(endpoint.id, endpoint.budget);
     const verifyChainId = options.verifyChainId ?? true;
     const expectedChainId = parameters.chain?.id ?? DEFAULT_CHAIN_ID;
     // A child whose `methods` filter rejects `eth_chainId` cannot be checked. Its filter is the caller's choice.
@@ -473,9 +573,27 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         config: { ...defaultScoreConfig, ...options.score },
         now,
         ejected: (id: string): boolean => breaker.isOpen(id),
+        spent: (id: string): boolean => !budgets.has(id),
+      },
+    );
+    // Without head tracking there are no heads to pin to, so the whole feature stays out of the way.
+    const pin = new LatestPin(
+      { ...pinConfig, enabled: pinConfig.enabled && headLag.enabled },
+      {
+        heads: (maxAgeMs: number) => board.heads(maxAgeMs),
+        maxLag: headLag.maxLag,
+        servable: (id: string, method: string): boolean =>
+          gates.get(id)?.verified === true &&
+          !quarantined(id) &&
+          !breaker.isOpen(id) &&
+          byId.get(id)?.supports(method) === true,
       },
     );
     const listeners = new Set<(event: HyperevmEvent) => void>();
+    // A joined call gives another call's request one attempt deadline, as it would give an endpoint of its own, plus
+    // a grace for the failover that follows a timed-out attempt. send() moves it out each time it starts an attempt
+    // or a wait, so a failover keeps its joined callers. A request stuck in a cancelled invocation never does.
+    const coalescer = new Coalescer(timeout + Math.min(timeout, INFLIGHT_GRACE_MS));
 
     const emit = (event: HyperevmEvent): void => {
       try {
@@ -493,6 +611,19 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     };
 
     const byId = new Map(built.map((endpoint) => [endpoint.id, endpoint]));
+    /** Endpoints outside `holders`, which a pinned read must not reach. None when nothing was pinned. */
+    const barredFrom = (holders: ReadonlySet<string> | undefined): ReadonlySet<string> =>
+      holders === undefined
+        ? NO_BAR
+        : new Set(built.filter((endpoint) => !holders.has(endpoint.id)).map((endpoint) => endpoint.id));
+    const warm = new WarmStart(board, {
+      persistence: options.persist,
+      ids: built.map((endpoint) => endpoint.id),
+      latencyCapMs: timeout,
+      loadTimeoutMs: timeout,
+      now,
+      emit,
+    });
 
     /**
      * A healthy answer, including a terminal error, closes the circuit.
@@ -541,6 +672,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     /** Send one `eth_chainId` for `endpoint` and record it as the gate's shared check. */
     const startCheck = (endpoint: BuiltEndpoint, gate: ChainGate): Promise<Error | undefined> => {
       const started = now();
+      budgets.take(endpoint.id);
       const pending = withDeadline(endpoint.request({ method: "eth_chainId" }), timeout).then(
         (result): Error | undefined => {
           const chainId = parseQuantity(result);
@@ -597,7 +729,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       }
       if (skipEjected && breaker.isOpen(endpoint.id)) return undefined;
       const target = byId.get(endpoint.id);
-      if (!target || gates.get(endpoint.id)?.verified !== false) return endpoint;
+      // A spent pick is not checked. The caller waits for a token and picks again.
+      if (!target || gates.get(endpoint.id)?.verified !== false || !budgets.has(endpoint.id)) return endpoint;
       return untilAborted(checkChain(target), parent).then((reason) => {
         if (!reason) return false;
         exclude.add(endpoint.id);
@@ -626,6 +759,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       if (!target) throw new Error(`Unknown HyperEVM endpoint: ${endpoint.id}`);
       // Shared instances outlive the invocation that started an attempt, so the count expires on its own.
       const end = board.begin(endpoint.id, timeout + INFLIGHT_GRACE_MS);
+      budgets.take(endpoint.id);
       emit({ type: "request", endpoint: endpoint.url, method });
       const started = now();
       // The child sees the caller's signal only. A private AbortController would
@@ -675,7 +809,10 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           const wrapped = state.timedOut && !state.ignore ? new TimeoutError(timeout) : toError(outcome.error);
           const callerAbort = parent?.aborted === true || isAbortError(wrapped);
           // A method the child's filter rejects never left the process, so it says nothing about the endpoint.
-          if (!state.ignore && !callerAbort && target.supports(method)) {
+          if (!state.ignore && !callerAbort && target.supports(method) && isBlockNotHeldError(wrapped)) {
+            // A block or two behind is not sick, and probes already score the lag. The call fails over.
+            emit({ type: "error", endpoint: endpoint.url, method, latencyMs, error: wrapped, terminal: false });
+          } else if (!state.ignore && !callerAbort && target.supports(method)) {
             // A terminal error is the endpoint answering about the call. It is not sick.
             const terminal = !shouldFailover(wrapped);
             if (terminal) {
@@ -706,16 +843,29 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       };
     };
 
+    /**
+     * `barred` endpoints never serve this call: a pinned read leaves out the endpoints not known to hold its block.
+     * They stay in `exclude` for every round, so `exclude.size > barred.size` means an endpoint failed this call.
+     * `progress` hears of each attempt and wait, so callers that joined a shared send keep waiting through them.
+     */
     const send = async (
       method: string,
       params: unknown,
       parent: AbortSignal | undefined,
       idempotent: boolean,
-      rebroadcast = false,
+      rebroadcast: boolean,
+      barred: ReadonlySet<string>,
+      progress: (waitMs?: number) => void = noProgress,
     ): Promise<unknown> => {
-      const exclude = new Set<string>();
+      const pause = (ms: number): Promise<void> => {
+        progress(ms);
+        return delay(ms, parent);
+      };
+      const exclude = new Set<string>(barred);
       const errors: Error[] = [];
       const retries = idempotent || rebroadcast;
+      // A race takes the best endpoints in score order, so its lead is never a p2c draw.
+      const racing = idempotent && raceRivals > 0;
       const attempts = retries ? retryCount + 1 : 1;
       // The availability exception: when every candidate is ejected before the first attempt, that attempt may
       // still use one. Nothing else is ever dispatched to an endpoint ejected at dispatch time.
@@ -723,39 +873,60 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       const lastResort = opening !== undefined && breaker.isOpen(opening.id);
       let previous: RankedEndpoint | undefined;
       let round = 0;
+      // Time spent waiting out ejections and budget refills together. It never passes MAX_RETRY_BACKOFF_MS.
       let ejectionWaitMs = 0;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         let wait = attempt > 0 ? retryDelay : 0;
-        let mode = attempt === 0 ? routing : "best";
+        let mode = attempt === 0 && !racing ? routing : "best";
         let allowEjected = attempt === 0 && lastResort;
         let newRound = false;
+        let exhausted: BudgetExhaustedError | undefined;
         let endpoint: RankedEndpoint | undefined;
-        // Every await below (chain check, retryDelay, backoff, ejection wait) is followed by a fresh pick, so
-        // the breaker is judged as it is at dispatch. The pick that returns is synchronous, so `start()` counts
-        // it in flight before any other call picks.
+        // Every await below (chain check, retryDelay, budget refill, backoff, ejection wait) is followed by a fresh
+        // pick, so the breaker is judged as it is at dispatch. The pick that returns is synchronous, so `start()`
+        // counts it in flight and spends its token before any other call picks.
         for (;;) {
           const picked = pickVerified(method, exclude, mode, parent, errors, !allowEjected);
           if (picked instanceof Promise) {
+            progress();
             // After a failed check an ejected endpoint is not checked next, so a storm costs one check per call.
             if (await picked) allowEjected = false;
             continue;
           }
           if (picked && wait > 0) {
-            await delay(wait, parent);
+            await pause(wait);
             wait = 0;
             continue;
           }
-          if (picked) {
+          if (picked && budgets.has(picked.id)) {
+            // A token refilled since pickVerified saw the bucket spent, so the pick skipped its chain check.
+            // Go back through the gate rather than send to an endpoint that never passed it.
+            if (gates.get(picked.id)?.verified === false) continue;
             endpoint = picked;
             break;
           }
-          if (exclude.size > 0 && !newRound) {
+          if (picked) {
+            // Every candidate is out of budget. Wait for the first token while the call's 2 second budget allows.
+            const spent = spentPeers(picked, method, exclude);
+            // At least 1ms, so a wait always draws on the call's budget.
+            const refillMs = Math.max(1, budgets.refillMs(spent));
+            if (ejectionWaitMs + refillMs <= MAX_RETRY_BACKOFF_MS) {
+              ejectionWaitMs += refillMs;
+              await pause(refillMs);
+              continue;
+            }
+            exhausted = new BudgetExhaustedError(spent, refillMs);
+            // Endpoints that already failed this call may still have budget. Otherwise stop below the limit.
+            if (exclude.size === barred.size || newRound) break;
+          }
+          if (exclude.size > barred.size && !newRound) {
             // Every usable endpoint failed this call, or failed its chain check. Go back to them after a backoff.
             exclude.clear();
+            for (const id of barred) exclude.add(id);
             // Stop now when the round could only wait out a longer ejection. The pick after the wait checks again.
             const candidate = board.pick(method, exclude, "best", random);
             if (!candidate || ejectionWaitMs + breaker.remaining(candidate.id) > MAX_RETRY_BACKOFF_MS) break;
-            await delay(backoffMs(round, retryBackoff, random), parent);
+            await pause(backoffMs(round, retryBackoff, random));
             round += 1;
             wait = 0;
             mode = "best";
@@ -768,14 +939,18 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           const leftMs = candidate ? breaker.remaining(candidate.id) : 0;
           if (leftMs <= 0 || ejectionWaitMs + leftMs > MAX_RETRY_BACKOFF_MS) break;
           ejectionWaitMs += leftMs;
-          await delay(leftMs, parent);
+          await pause(leftMs);
         }
-        if (!endpoint) break;
+        if (!endpoint) {
+          if (exhausted) errors.push(exhausted);
+          break;
+        }
         exclude.add(endpoint.id);
         if (previous && previous.id !== endpoint.id)
           emit({ type: "failover", from: previous.url, to: endpoint.url, method });
+        progress();
         try {
-          return await dispatch(endpoint, method, params, parent, idempotent, exclude);
+          return await dispatch(endpoint, method, params, parent, idempotent, exclude, errors, attempt === 0 && racing);
         } catch (error: unknown) {
           const wrapped = toError(error);
           errors.push(wrapped);
@@ -796,6 +971,20 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       throw new AllEndpointsFailedError(errors);
     };
 
+    /** Labels of the endpoints `picked` was chosen among: eligible, and in its breaker state. */
+    const spentPeers = (picked: RankedEndpoint, method: string, exclude: ReadonlySet<string>): string[] => {
+      const open = breaker.isOpen(picked.id);
+      return built
+        .filter(
+          (endpoint) =>
+            !exclude.has(endpoint.id) &&
+            !quarantined(endpoint.id) &&
+            endpoint.supports(method) &&
+            breaker.isOpen(endpoint.id) === open,
+        )
+        .map((endpoint) => endpoint.id);
+    };
+
     const dispatch = (
       endpoint: RankedEndpoint,
       method: string,
@@ -803,13 +992,28 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       parent: AbortSignal | undefined,
       idempotent: boolean,
       exclude: Set<string>,
+      errors: Error[],
+      race: boolean,
     ): Promise<unknown> => {
-      const primary = start(endpoint, method, params, parent, false, true);
+      const rivals = race ? pickRivals(method, exclude) : [];
+      if (rivals.length > 0)
+        emit({ type: "race", endpoints: [endpoint.url, ...rivals.map((rival) => rival.url)], method });
+      const lead = start(endpoint, method, params, parent, false, true);
+      // Rivals join `exclude`, so a race that fails moves on to the endpoints it did not try.
+      const primary =
+        rivals.length === 0
+          ? lead
+          : raceCalls(
+              [lead, ...rivals.map((rival) => start(rival, method, params, parent, false, true))],
+              (error) => !shouldFailover(error) || options.shouldThrow?.(error) === true,
+              (lost) => errors.push(...lost),
+            );
       if (!hedge.enabled || !idempotent) return primary.promise;
       const wait = board.hedgeDelay(endpoint.id, method, hedge.minDelay, hedge.multiplier);
       return raceHedge(primary, wait, (active) => {
         const next = board.pick(method, exclude, "best", random);
-        if (!next || breaker.isOpen(next.id)) return undefined;
+        // A hedge never waits for a token.
+        if (!next || breaker.isOpen(next.id) || !budgets.has(next.id)) return undefined;
         exclude.add(next.id);
         const launch = (): Inflight => {
           emit({ type: "hedge", endpoint: next.url, method });
@@ -820,23 +1024,48 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         // An unverified backup is checked now. With probes off, nothing else would ever check it for a hedge.
         return untilAborted(checkChain(target), parent).then(
           // A concurrent call may have ejected the backup while it was checked.
-          (reason) => (reason || !active() || breaker.isOpen(next.id) ? undefined : launch()),
+          (reason) => (reason || !active() || breaker.isOpen(next.id) || !budgets.has(next.id) ? undefined : launch()),
           () => undefined,
         );
       });
     };
 
+    /**
+     * Endpoints to race beside the lead, synchronously and against the breaker as it is at dispatch.
+     * Only verified, unquarantined, closed endpoints with a budget token race. An unverified one is checked in the
+     * background instead, unless it is out of budget: a race never waits for a token or spends one on a check.
+     */
+    const pickRivals = (method: string, exclude: Set<string>): RankedEndpoint[] => {
+      const rivals = pickRacers(raceRivals, exclude, {
+        next: (skip: ReadonlySet<string>): RankedEndpoint | undefined => board.pick(method, skip, "best", random),
+        state: (endpoint: RankedEndpoint): "ready" | "unverified" | "unavailable" => {
+          if (breaker.isOpen(endpoint.id) || !budgets.has(endpoint.id)) return "unavailable";
+          return gates.get(endpoint.id)?.verified === false ? "unverified" : "ready";
+        },
+        verify: (endpoint: RankedEndpoint): void => {
+          const target = byId.get(endpoint.id);
+          if (target) void checkChain(target);
+        },
+      });
+      for (const rival of rivals) exclude.add(rival.id);
+      return rivals;
+    };
+
     let closed = false;
+    let probing: Promise<void> | undefined;
+    let lastProbeAt = Number.NEGATIVE_INFINITY;
 
     const probe = (): Promise<void> => {
       if (closed) return Promise.resolve();
+      lastProbeAt = Date.now();
       // An ejected endpoint is left alone until its cooldown ends. The provider may have asked for the quiet.
       // A child whose `methods` filter rejects `eth_blockNumber` is never probed: viem would refuse it locally.
+      // A spent endpoint is skipped, not waited for, and so is one whose chain check took its last token.
       const pending = built.map((endpoint) =>
-        breaker.isOpen(endpoint.id) || !endpoint.supports("eth_blockNumber")
+        breaker.isOpen(endpoint.id) || !endpoint.supports("eth_blockNumber") || !budgets.has(endpoint.id)
           ? Promise.resolve()
           : checkChain(endpoint).then((reason) =>
-              reason
+              reason || !budgets.has(endpoint.id)
                 ? undefined
                 : start(endpoint, "eth_blockNumber", [], undefined, false, false).promise.then(
                     () => undefined,
@@ -844,33 +1073,78 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
                   ),
             ),
       );
-      return Promise.all(pending).then(() => undefined);
+      const done = Promise.all(pending).then(() => undefined);
+      probing = done;
+      void done.finally(() => {
+        if (probing === done) probing = undefined;
+      });
+      return done;
     };
 
     const probeEvery =
       headLag.enabled && headLag.probeInterval !== false && headLag.probeInterval > 0 ? headLag.probeInterval : 0;
     let probeTimer: ReturnType<typeof setInterval> | undefined;
     let lastRequestAt = 0;
+    const activity = new Activity(options.isActive);
 
     const stopProbes = (): void => {
       if (probeTimer === undefined) return;
       clearInterval(probeTimer);
       probeTimer = undefined;
+      activity.unwatch();
+    };
+
+    const probeTick = (): void => {
+      const idle = headLag.probeIdleTimeout;
+      if (idle !== false && Date.now() - lastRequestAt >= idle) {
+        stopProbes();
+        return;
+      }
+      // An idle check still runs while inactive, so a hidden tab's timer and listener stop on schedule.
+      if (!activity.active()) return;
+      void probe();
+    };
+
+    /**
+     * The page came back into view: probe now instead of waiting out the interval. Switching tabs fires this in
+     * bursts, so it probes only when no probe is in flight and none ran in the last interval.
+     */
+    const probeOnVisible = (): void => {
+      if (probing !== undefined || Date.now() - lastProbeAt < probeEvery) return;
+      probeTick();
     };
 
     // Runs on every request. The timer starts here, so building a client does no timer work or I/O.
     const touch = (): void => {
       lastRequestAt = Date.now();
       if (probeEvery === 0 || probeTimer !== undefined) return;
-      probeTimer = setInterval(() => {
-        const idle = headLag.probeIdleTimeout;
-        if (idle !== false && Date.now() - lastRequestAt >= idle) {
-          stopProbes();
-          return;
-        }
-        void probe();
-      }, probeEvery);
+      probeTimer = setInterval(probeTick, probeEvery);
       unrefTimer(probeTimer);
+      // A page that comes back into view probes at once instead of waiting out the interval.
+      activity.watch(probeOnVisible);
+    };
+
+    /**
+     * `send()`, shared with identical in-flight reads when coalescing applies. The key is computed on `params` as
+     * given, so a params rewrite (pinning `latest`) happens before this. A shared request sits above `send()`,
+     * so a race or hedge is never joined halfway.
+     */
+    const sendShared = (
+      method: string,
+      params: unknown,
+      signal: AbortSignal | undefined,
+      idempotent: boolean,
+      rebroadcast: boolean,
+      barred: ReadonlySet<string>,
+    ): Promise<unknown> => {
+      const shareKey = coalesce && isCoalescableMethod(method, idempotent) ? coalesceKey(method, params) : undefined;
+      if (shareKey === undefined) return send(method, params, signal, idempotent, rebroadcast, barred);
+      return coalescer.request(
+        shareKey,
+        signal,
+        (sharedSignal, progress) => send(method, params, sharedSignal, idempotent, rebroadcast, barred, progress),
+        () => emit({ type: "coalesce", method }),
+      );
     };
 
     const value: HyperevmTransportValue = {
@@ -881,13 +1155,18 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         };
       },
       snapshot: (method = "eth_call"): readonly EndpointSnapshot[] =>
-        board.snapshot(method).map((entry) => ({ ...entry, quarantined: quarantined(entry.id) })),
+        board
+          .snapshot(method)
+          .map((entry) => ({ ...entry, quarantined: quarantined(entry.id), tokens: budgets.remaining(entry.id) })),
+      scores: (): ScoreSnapshot => warm.scores(),
+      restoreScores: (snapshot: unknown): boolean => warm.restore(snapshot),
       endpoints: built.map((endpoint) => ({ id: endpoint.id, url: endpoint.url, weight: endpoint.weight })),
       probe,
       close(): void {
         if (closed) return;
         closed = true;
         stopProbes();
+        warm.close();
         if (shared.get(key) === transport) shared.delete(key);
       },
     };
@@ -903,11 +1182,23 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         request: (async (args: EIP1193Parameters, requestOptions?: EIP1193RequestOptions): Promise<unknown> => {
           if (closed) throw new TransportClosedError();
           touch();
+          const warming = warm.touch();
+          if (warming) await warming;
           const method = args.method;
           const idempotent = isIdempotentMethod(method, extraNonIdempotent);
           const rebroadcast = rebroadcastRaw && isRebroadcastMethod(method);
           const params = "params" in args ? args.params : undefined;
-          return send(method, params, requestOptions?.signal, idempotent, rebroadcast);
+          const signal = requestOptions?.signal;
+          if (method === "eth_blockNumber" && idempotent && pin.answersBlockNumber) {
+            if (signal?.aborted) throw abortError(signal);
+            const local = pin.blockNumber();
+            if (local !== undefined) return local;
+            // Each caller raises the shared answer on its own, so a joined call never sees a lower block.
+            return pin.observe(await sendShared(method, params, signal, idempotent, rebroadcast, NO_BAR));
+          }
+          // Pin before coalescing: the key is computed on the params as sent, so pinned calls share by block.
+          const pinned = pin.pin(method, params, idempotent);
+          return sendShared(method, pinned.params, signal, idempotent, rebroadcast, barredFrom(pinned.holders));
         }) as EIP1193RequestFn,
       },
       value,
@@ -1049,6 +1340,7 @@ interface PendingEndpoint {
   /** Spellings of the URL to scrub from errors. */
   secrets: string[];
   hint: RetryHint;
+  budget: BudgetConfig | undefined;
 }
 
 /**
@@ -1083,6 +1375,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
   const inputs: readonly HyperevmEndpoint[] =
     options.endpoints ?? registryHttpEndpoints().map((endpoint) => endpoint.url);
   const pending: PendingEndpoint[] = [];
+  const fallbackBudget = resolveDefaultBudget(options.budget);
   const urls = new Set<string>();
   const labels = new Set<string>();
   inputs.forEach((input, index) => {
@@ -1117,6 +1410,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
       instance,
       secrets: secrets.filter((secret): secret is string => secret !== undefined),
       hint,
+      budget: resolveEndpointBudget(config, fallbackBudget, `hyperevm() endpoints[${index}]`),
     });
   });
   return pending.map((entry) => {
@@ -1130,6 +1424,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
       supports: (method: string): boolean => supportsMethod(methods, method),
       request: redactErrors(instance.request as BuiltEndpoint["request"], entry.secrets, label),
       retryAfter: entry.hint.take,
+      budget: entry.budget,
     };
   });
 }

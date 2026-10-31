@@ -70,6 +70,15 @@ const ALREADY_KNOWN_MESSAGE = /already known|\bknown transaction|already importe
 const PROVIDER_LIMIT_MESSAGE =
   /(?:max(?:imum)?|exceed\w*|too (?:large|wide|big|many)|limit\w*)[^.\n]*block range|block range[^.\n]*(?:too|exceed\w*|limit\w*|max)|ranges? over \d|too many (?:results|logs|blocks)|more than \d[\d,]* (?:results|logs|blocks)|response size|size (?:limit|exceeded)|limit exceeded|limited to|query timeout|query timed out/i;
 
+/**
+ * A node that has not reached the block a call names. Nodes a block or two apart disagree on what exists, so
+ * another endpoint may hold it. The official HyperEVM RPC answers `eth_getLogs` past its head with `-32602 invalid
+ * block range`, and geth answers a state read past it with `header not found`. An inverted range gets the same
+ * text: failing it over costs a few requests, and every endpoint then rejects it alike.
+ */
+const BLOCK_NOT_HELD_MESSAGE =
+  /header not found|unknown block|invalid block range|block range extends beyond|beyond (?:the )?(?:current )?head/i;
+
 /** JSON-RPC invalid params. */
 const INVALID_PARAMS_CODE = -32602;
 
@@ -99,6 +108,14 @@ export function isAlreadyKnownError(error: Error): boolean {
   return ALREADY_KNOWN_MESSAGE.test(errorText(error));
 }
 
+/**
+ * True when the endpoint answered that it does not hold the block the call names yet. Another endpoint may, so the
+ * call fails over, but the endpoint is not sick: it is a block behind. It costs no breaker strike or error sample.
+ */
+export function isBlockNotHeldError(error: Error): boolean {
+  return !isAbortError(error) && BLOCK_NOT_HELD_MESSAGE.test(errorText(error));
+}
+
 /** True when the failure is an abort initiated by the caller or by hedge cancellation. */
 export function isAbortError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
@@ -108,13 +125,15 @@ export function isAbortError(error: unknown): boolean {
  * True when another endpoint might answer this call.
  * Execution reverts, invalid params, transaction rejections, and user
  * rejections stay on the caller: the endpoint answered. Provider limits coded
- * as invalid params (block range, result count, response size) fail over.
+ * as invalid params (block range, result count, response size) fail over, and
+ * so does a block the endpoint has not reached yet.
  */
 export function shouldFailover(error: Error): boolean {
   if (isAbortError(error)) return false;
   const text = errorText(error);
   if (TERMINAL_MESSAGE.test(text)) return false;
   if (REJECTED_TRANSACTION_MESSAGE.test(text)) return false;
+  if (BLOCK_NOT_HELD_MESSAGE.test(text)) return true;
   const code = errorCode(error);
   if (code === INVALID_PARAMS_CODE && PROVIDER_LIMIT_MESSAGE.test(text)) return true;
   if (code !== undefined && TERMINAL_CODES.has(code)) return false;

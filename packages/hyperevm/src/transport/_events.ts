@@ -42,6 +42,17 @@ export type HyperevmEvent =
       method: string;
     }
   | {
+      /** An idempotent read went to these endpoints at once, best score first. Each also gets a `request`. */
+      type: "race";
+      endpoints: string[];
+      method: string;
+    }
+  | {
+      /** The call joined an identical read already in flight and sent nothing of its own. */
+      type: "coalesce";
+      method: string;
+    }
+  | {
       type: "head";
       endpoint: string;
       head: number;
@@ -69,6 +80,12 @@ export type HyperevmEvent =
       /** A healthy answer closed an ejected endpoint's circuit. */
       type: "restore";
       endpoint: string;
+    }
+  | {
+      /** `persist.load` or `persist.save` failed, or loaded a snapshot that is not valid. Calls are unaffected. */
+      type: "persist";
+      operation: "load" | "save";
+      error: Error;
     };
 
 /** One endpoint as the transport currently scores it. */
@@ -81,6 +98,8 @@ export interface EndpointSnapshot {
   /** True once `eth_chainId` reported another chain. */
   quarantined: boolean;
   inflight: number;
+  /** Whole tokens left in the endpoint's request budget. Null when it has none. */
+  tokens: number | null;
   head: number | null;
   lag: number | null;
   score: number;
