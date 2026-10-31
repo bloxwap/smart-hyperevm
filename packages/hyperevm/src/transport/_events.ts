@@ -92,6 +92,8 @@ export interface EndpointSnapshot {
   /** True once `eth_chainId` reported another chain. */
   quarantined: boolean;
   inflight: number;
+  /** Whole tokens left in the endpoint's request budget. Null when it has none. */
+  tokens: number | null;
   head: number | null;
   lag: number | null;
   score: number;

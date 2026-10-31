@@ -54,6 +54,23 @@ The tag is found in `eth_call`, `eth_getBalance`, `eth_getCode`, and `eth_getTra
 While a pin exists, `eth_blockNumber` is answered locally with the same block, so the number a client reads is one the next read can be served at. Otherwise it goes upstream. Answers from one instance never go backwards, upstream ones included. Set `pinLatest: { blockNumber: false }` to keep `eth_blockNumber` upstream. Heads come from probes and from `eth_blockNumber` answers, so pinning works with `probeInterval: false`: a stale head sends the next `eth_blockNumber` upstream, and its answer is fresh again. With `headLag: false` there are no heads, and pinning does nothing.
 
 An endpoint with no fresh head is not part of the floor, and the call may still be routed to it. With the default 4 second probe interval, probe heads alone are fresh about a quarter of the time.
+## Request budgets
+
+Public endpoints limit requests per IP. A budget keeps the transport under that limit instead of finding it with a 429. Give an endpoint `{ url, label, rps, burst }`, or every endpoint without its own a default with `budget: { rps, burst }`. `burst` defaults to `max(1, ceil(rps * 2))`. There is no budget unless you set one, and `budget: false` turns off the per-endpoint ones too.
+
+Each budgeted endpoint has a token bucket that starts full, holds `burst` tokens, and refills at `rps` per second. It refills from the clock when it is read, so it needs no timer. Every upstream request spends a token: calls, retries, hedges, chain checks, and head probes. The buckets belong to the factory, so instances built with another timeout or chain spend the same budget. `snapshot()` shows whole tokens left as `tokens`, or `null` for an unlimited endpoint.
+
+Routing skips a spent endpoint while another candidate in the same breaker state has a token. A spent closed endpoint still comes before an ejected one with tokens, so the budget never sends a call into a cooldown. When every candidate is spent, the call waits for the first token. That wait shares the call's 2 second limit with ejection waits. Past it, the call throws `BudgetExhaustedError` with the endpoints' labels and the wait it would have needed, and sends nothing over the limit. If endpoints that already failed this call still have tokens, it starts another round on them first. The all-ejected exception does not override a budget: the first attempt may use an ejected endpoint only when it has a token, and otherwise waits or throws like any other call. A spent endpoint is not sent a chain check. Head probes and hedges skip spent endpoints instead of waiting. A send that waits for a token has not left the process, so non-idempotent methods keep their one-endpoint rule.
+
+The registry does not ship budgets. These are the rates the monorepo router uses for one IP. Only the official endpoint's is documented (about 100 requests a minute). The rest are guesses.
+
+| Endpoint | rps |
+| --- | --- |
+| `https://rpc.hyperliquid.xyz/evm` | 1.5 |
+| `https://rpc.purroofgroup.com`, `https://hyperliquid.drpc.org`, `https://999.rpc.thirdweb.com`, `https://rpc.hypurrscan.io` | 10 |
+| `https://hyperliquid-json-rpc.stakely.io`, `https://rpc.hyperlend.finance` | 5 |
+
+With the default 4 second probe, head probes alone spend 0.25 rps per endpoint.
 
 ## What is not retried
 
