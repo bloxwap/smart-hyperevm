@@ -35,6 +35,7 @@ import {
   DEFAULT_BREAKER_THRESHOLD,
   retryAfterMs,
 } from "./_breaker.ts";
+import { Coalescer, coalesceKey, isCoalescableMethod } from "./_coalesce.ts";
 import type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
 import {
   isAbortError,
@@ -215,6 +216,12 @@ export interface HyperevmTransportOptions {
    * unless `blockNumber` is false. Needs `headLag`. Default: off.
    */
   pinLatest?: boolean | PinLatestOptions | undefined;
+  /**
+   * Identical concurrent idempotent reads (same method and params) share one upstream request, and every caller
+   * gets its result or error. Nothing is kept after it settles. Sends, non-idempotent methods, subscriptions, and
+   * filters never share. Default: true.
+   */
+  coalesce?: boolean | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
   routing?: "best" | "p2c" | undefined;
   /** Extra methods that must not be retried or hedged. */
@@ -437,6 +444,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
   const rebroadcastRaw = options.rebroadcastRawTransactions ?? true;
   const breakerConfig = resolveBreaker(options.breaker);
   const pinConfig = resolvePin(options.pinLatest);
+  const coalesce = options.coalesce ?? true;
 
   return (parameters: {
     account?: unknown;
@@ -508,6 +516,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       },
     );
     const listeners = new Set<(event: HyperevmEvent) => void>();
+    // A joined call gives another call's request one attempt deadline, as it would give an endpoint of its own.
+    const coalescer = new Coalescer(timeout);
 
     const emit = (event: HyperevmEvent): void => {
       try {
@@ -941,6 +951,28 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       unrefTimer(probeTimer);
     };
 
+    /**
+     * `send()`, shared with identical in-flight reads when coalescing applies. The key is computed on `params` as
+     * given, so a params rewrite (pinning `latest`) happens before this. A shared request sits above `send()`,
+     * so a race or hedge is never joined halfway.
+     */
+    const sendShared = (
+      method: string,
+      params: unknown,
+      signal: AbortSignal | undefined,
+      idempotent: boolean,
+      rebroadcast: boolean,
+    ): Promise<unknown> => {
+      const shareKey = coalesce && isCoalescableMethod(method, idempotent) ? coalesceKey(method, params) : undefined;
+      if (shareKey === undefined) return send(method, params, signal, idempotent, rebroadcast);
+      return coalescer.request(
+        shareKey,
+        signal,
+        (sharedSignal) => send(method, params, sharedSignal, idempotent, rebroadcast),
+        () => emit({ type: "coalesce", method }),
+      );
+    };
+
     const value: HyperevmTransportValue = {
       onEvent(listener: (event: HyperevmEvent) => void): () => void {
         listeners.add(listener);
@@ -978,9 +1010,13 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           const signal = requestOptions?.signal;
           if (method === "eth_blockNumber" && idempotent && pin.answersBlockNumber) {
             if (signal?.aborted) throw abortError(signal);
-            return pin.blockNumber() ?? pin.observe(await send(method, params, signal, idempotent, rebroadcast));
+            const local = pin.blockNumber();
+            if (local !== undefined) return local;
+            // Each caller raises the shared answer on its own, so a joined call never sees a lower block.
+            return pin.observe(await sendShared(method, params, signal, idempotent, rebroadcast));
           }
-          return send(method, pin.params(method, params, idempotent), signal, idempotent, rebroadcast);
+          // Pin before coalescing: the key is computed on the params as sent, so pinned calls share by block.
+          return sendShared(method, pin.params(method, params, idempotent), signal, idempotent, rebroadcast);
         }) as EIP1193RequestFn,
       },
       value,

@@ -207,6 +207,8 @@ describe("losers", () => {
         { transport: fast.transport, label: "fast" },
       ],
       breaker: { threshold: 1 },
+      // A coalesced call runs under a private signal, so the caller's abort after it settled would not reach the loser.
+      coalesce: false,
       onEvent: (e) => events.push(e),
     });
     const controller = new AbortController();

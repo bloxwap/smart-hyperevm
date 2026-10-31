@@ -48,6 +48,11 @@ export type HyperevmEvent =
       method: string;
     }
   | {
+      /** The call joined an identical read already in flight and sent nothing of its own. */
+      type: "coalesce";
+      method: string;
+    }
+  | {
       type: "head";
       endpoint: string;
       head: number;

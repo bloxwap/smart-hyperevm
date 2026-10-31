@@ -80,6 +80,15 @@ Racing is off unless you set `race`. It costs `width` upstream requests per read
 Only endpoints that have passed their chain check, are not quarantined, and are not ejected at dispatch are raced. An unverified endpoint is skipped and checked in the background, so the next call can race it. When every endpoint is ejected, the availability exception sends the first attempt to one endpoint and nothing races. Sends and the other methods in the next section never race.
 
 Losers are not cancelled. They run to their own deadline and record their latency and errors like any call, so each race re-measures the runner-up and the ranking follows whichever endpoint is fastest now. A loser the caller aborts records nothing, and its in-flight count ends with it. A `race` event lists the racers, best first, and each racer also gets a `request` event. With `hedge` on as well, the hedge adds the next endpoint after its delay on top of the racers.
+## Coalescing
+
+Identical idempotent reads that are in flight at the same time share one upstream request. Two calls are identical when the method and params match, with object keys sorted. A bigint param never matches a string or number param. The shared request goes through the same routing, failover, breaker, and chain checks as any call, and every caller gets its result or its error. A caller that joins fires a `coalesce` event and sends nothing of its own. The entry is dropped as soon as the request settles, so nothing is cached and memory is bounded by the calls in flight. Each `hyperevm()` instance has its own table.
+
+Sends, methods in the non-idempotent list or `nonIdempotentMethods`, subscriptions, and filter methods (`eth_newFilter`, `eth_getFilterChanges`, `eth_getFilterLogs`, `eth_uninstallFilter`, and the rest) never share a request.
+
+Each caller waits under its own abort signal. A caller that aborts is rejected with its own reason, and the others keep waiting. The shared request is cancelled only when every waiting caller has aborted. A caller without a signal keeps it running. A cancelled request leaves the table at once, so a later caller starts a fresh one and never inherits an aborted signal. A request whose first caller has no signal is sent without one, so viem's HTTP batching still groups it. On Workers the invocation that started a request can end and take it with it, so its promise may never settle. A caller waits on another caller's request until one `timeout` after that request started, then starts its own, and the old request is not joined again.
+
+Set `coalesce: false` to send every call.
 
 ## Registry score
 

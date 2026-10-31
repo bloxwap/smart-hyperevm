@@ -118,6 +118,7 @@ const transport = hyperevm({
 - Each endpoint's `eth_chainId` is checked before its first call. An endpoint on another chain is quarantined. Set `verifyChainId: false` to skip the check.
 - An endpoint with 3 consecutive failures, or a `Retry-After`, is ejected for a cooldown (`breaker`). Routing skips it unless every endpoint is ejected.
 - `pinLatest: true` rewrites `"latest"` on reads to a block every servable endpoint holds, and answers `eth_blockNumber` with it, so a block number from one node is one the next node can serve. Off by default.
+- Identical concurrent reads share one upstream request (`coalesce`, default on). Each caller gets its result or error, and nothing is cached after it settles. Sends and filters are never shared.
 - The probe timer starts on the first request and stops after `headLag.probeIdleTimeout` (60 seconds) without one. `transport.value.close()` stops it and rejects later requests with `TransportClosedError`.
 - The default registry pool rests on one probe run. Prefer explicit endpoints in a service.
 
