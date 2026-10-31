@@ -436,6 +436,58 @@ describe("chain checks under concurrency", () => {
     expect(Date.now() - started).toBeLessThan(120);
     expect(fast.calls.map((call) => call.method)).toEqual(["eth_chainId", "eth_call"]);
   });
+
+  test("a hedge whose backup fails its chain check leaves the primary running", async () => {
+    const slow = mockEndpoint("slow", async (method) => {
+      if (method === "eth_chainId") return "0x3e7";
+      await sleep(30);
+      return "0xslow";
+    });
+    const wrong = mockEndpoint("wrong", (method) => (method === "eth_chainId" ? "0x3e6" : "0xwrong"));
+    const client = open({
+      endpoints: [slow.transport, wrong.transport],
+      verifyChainId: true,
+      hedge: { minDelay: 5, multiplier: 0 },
+    });
+    expect(await client.request({ method: "eth_call", params: [] })).toBe("0xslow");
+    expect(wrong.calls.map((call) => call.method)).toEqual(["eth_chainId"]);
+  });
+
+  test("a failed hedge leaves the primary running", async () => {
+    const slow = mockEndpoint("slow", async (method) => {
+      if (method === "eth_chainId") return "0x3e7";
+      await sleep(30);
+      return "0xslow";
+    });
+    const failed = mockEndpoint("failed", (method) => {
+      if (method === "eth_chainId") return "0x3e7";
+      throw new Error("socket hang up");
+    });
+    const client = open({
+      endpoints: [slow.transport, failed.transport],
+      verifyChainId: true,
+      hedge: { minDelay: 5, multiplier: 0 },
+    });
+    expect(await client.request({ method: "eth_call", params: [] })).toBe("0xslow");
+  });
+
+  test("aborting while a hedge checks its backup cancels the call", async () => {
+    const slow = mockEndpoint("slow", (method) => (method === "eth_chainId" ? "0x3e7" : hang()));
+    const checking = mockEndpoint("checking", (method) => (method === "eth_chainId" ? hang() : "0x1"));
+    const client = open({
+      endpoints: [slow.transport, checking.transport],
+      verifyChainId: true,
+      hedge: { minDelay: 5, multiplier: 0 },
+      coalesce: false,
+    });
+    const controller = new AbortController();
+    const pending = client.request({ method: "eth_call", params: [] }, { signal: controller.signal });
+    await sleep(15);
+    expect(checking.calls.map((call) => call.method)).toContain("eth_chainId");
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(checking.calls.filter((call) => call.method === "eth_call")).toHaveLength(0);
+  });
 });
 
 describe("breaker interactions", () => {
@@ -898,6 +950,20 @@ describe("method filters", () => {
     }
     expect(events.filter((event) => event.type === "error" && event.endpoint === "transport:0")).toEqual([]);
     expect(node.calls.map((call) => call.method)).toEqual(["eth_call", "eth_call", "eth_call", "eth_call"]);
+  });
+
+  test("an empty methods filter allows every method", async () => {
+    const transport: Transport = () =>
+      createTransport({
+        key: "unfiltered",
+        name: "unfiltered",
+        type: "test",
+        retryCount: 0,
+        methods: {},
+        request: (async () => "0x1") as EIP1193RequestFn,
+      });
+    const client = open({ endpoints: [transport] });
+    expect(await client.request({ method: "eth_call", params: [] })).toBe("0x1");
   });
 });
 

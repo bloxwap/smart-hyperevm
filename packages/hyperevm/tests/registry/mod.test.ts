@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 
 import { readFileSync } from "node:fs";
 
-import { assertRegistryFile, defaultRegistry, registryHttpEndpoints } from "../../src/registry/mod.ts";
+import {
+  assertRegistryFile,
+  defaultRankPolicy,
+  defaultRegistry,
+  registryHttpEndpoints,
+  registryPolicy,
+} from "../../src/registry/mod.ts";
 import { normalizeRpcUrl } from "../../src/registry/_url.ts";
 
 describe("shipped registry", () => {
@@ -72,6 +78,44 @@ describe("assertRegistryFile", () => {
     };
     for (const ok of [true, false, null, undefined]) expect(() => assertRegistryFile(withStats(ok))).not.toThrow();
     expect(() => assertRegistryFile(withStats("yes"))).toThrow(/precompileOk/);
+  });
+
+  test("rejects malformed scalar and endpoint fields", () => {
+    interface MutableFile {
+      updatedAt: unknown;
+      policy: Record<string, unknown>;
+      endpoints: Record<string, unknown>[];
+    }
+    const rejects = (change: (file: MutableFile) => void, message: RegExp): void => {
+      const file = registryFile("https://rpc.example/evm") as MutableFile;
+      change(file);
+      expect(() => assertRegistryFile(file)).toThrow(message);
+    };
+    rejects((file) => {
+      file.updatedAt = "";
+    }, /updatedAt/);
+    rejects((file) => {
+      file.policy.windowMs = Number.POSITIVE_INFINITY;
+    }, /windowMs/);
+    rejects((file) => {
+      file.endpoints[0]!.tracking = "sometimes";
+    }, /tracking/);
+    rejects((file) => {
+      file.endpoints[0]!.submission = "manual";
+    }, /submission/);
+    rejects((file) => {
+      file.endpoints[0]!.kind = "ftp";
+    }, /kind/);
+    rejects((file) => {
+      file.endpoints[0]!.sources = [];
+    }, /sources/);
+    rejects((file) => {
+      file.endpoints[0]!.rank = 0;
+    }, /rank/);
+  });
+
+  test("ships a complete rank policy", () => {
+    expect(registryPolicy()).toEqual({ ...defaultRankPolicy, ...defaultRegistry.policy });
   });
 });
 

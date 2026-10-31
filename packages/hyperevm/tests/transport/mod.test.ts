@@ -137,6 +137,54 @@ describe("hyperevm transport", () => {
     await expect(client.request({ method: "eth_chainId" })).rejects.toBeInstanceOf(AllEndpointsFailedError);
   });
 
+  test("event listener failures do not interrupt requests", async () => {
+    const endpoint = mockEndpoint("only", () => "0x1");
+    const client = open({
+      endpoints: [endpoint.transport],
+      onEvent: () => {
+        throw new Error("observer failed");
+      },
+    });
+    client.value?.onEvent(() => {
+      throw new Error("subscriber failed");
+    });
+    expect(await client.request({ method: "eth_call", params: [] })).toBe("0x1");
+  });
+
+  test("an abort during warm start rejects an uncoalesced call with the caller's reason", async () => {
+    const endpoint = mockEndpoint("only", () => "0x1");
+    const controller = new AbortController();
+    const client = open({
+      endpoints: [endpoint.transport],
+      coalesce: false,
+      retryCount: 0,
+      persist: {
+        load: () => {
+          controller.abort("caller stopped");
+          return undefined;
+        },
+        save: () => undefined,
+      },
+    });
+    const error = await client
+      .request({ method: "eth_call", params: [] }, { signal: controller.signal })
+      .catch((caught: unknown) => caught);
+    expect(error).toBe("caller stopped");
+  });
+
+  test("aborting before a retry wait rejects without another attempt", async () => {
+    const controller = new AbortController();
+    const endpoint = mockEndpoint("only", () => {
+      controller.abort(new Error("caller stopped"));
+      throw new Error("socket hang up");
+    });
+    const client = open({ endpoints: [endpoint.transport], coalesce: false, retryCount: 1, retryDelay: 50 });
+    await expect(client.request({ method: "eth_call", params: [] }, { signal: controller.signal })).rejects.toThrow(
+      "caller stopped",
+    );
+    expect(endpoint.calls).toHaveLength(1);
+  });
+
   test("routes later calls to the endpoint with the better latency", async () => {
     let nowMs = 0;
     const slow = mockEndpoint("slow", () => {

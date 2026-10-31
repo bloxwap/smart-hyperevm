@@ -605,8 +605,6 @@ export class ReadCache {
         if (head === undefined || entry.to >= head) return undefined;
         return this.#tail(plan);
       }
-      default:
-        return undefined;
     }
   }
 

@@ -101,6 +101,11 @@ describe("coalesceKey", () => {
     const shared = { a: 1 };
     expect(coalesceKey("eth_call", [shared, shared])).toBe('eth_call:[{"a":1},{"a":1}]');
   });
+
+  test("serializes functions, symbols, and toJSON results without confusing them with objects", () => {
+    expect(coalesceKey("m", [() => undefined, Symbol("x")])).toBe("m:[<function>,<symbol>]");
+    expect(coalesceKey("m", [{ toJSON: () => ({ b: 2, a: 1 }) }])).toBe('m:[{"a":1,"b":2}]');
+  });
 });
 
 describe("isCoalescableMethod", () => {
@@ -493,5 +498,30 @@ describe("Coalescer", () => {
     gate.resolve("0x1");
     await Promise.all(pending);
     expect(coalescer.size).toBe(0);
+  });
+
+  test("a synchronous run failure rejects and cleans up its entry", async () => {
+    const coalescer = new Coalescer(1_000);
+    const pending = coalescer.request(
+      "k",
+      undefined,
+      () => {
+        throw new Error("sync failure");
+      },
+      () => undefined,
+    );
+    await expect(pending).rejects.toThrow("sync failure");
+    expect(coalescer.size).toBe(0);
+  });
+
+  test("a non-Error abort reason becomes an AbortError", async () => {
+    const coalescer = new Coalescer(1_000);
+    const controller = new AbortController();
+    const pending = coalescer.request("k", controller.signal, untilAbort, () => undefined);
+    controller.abort("caller stopped");
+    const error = await pending.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).toBe("AbortError");
+    expect((error as Error).message).toBe("This operation was aborted");
   });
 });

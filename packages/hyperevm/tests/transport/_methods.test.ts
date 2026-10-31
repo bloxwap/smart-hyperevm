@@ -6,6 +6,7 @@ import {
   isIdempotentMethod,
   isRebroadcastMethod,
   shouldFailover,
+  toError,
 } from "../../src/transport/_methods.ts";
 
 describe("method safety", () => {
@@ -106,5 +107,12 @@ describe("method safety", () => {
     expect(isRebroadcastMethod("eth_sendRawTransactionSync")).toBe(true);
     expect(isRebroadcastMethod("eth_sendTransaction")).toBe(false);
     expect(isRebroadcastMethod("eth_subscribe")).toBe(false);
+  });
+
+  test("normalizes unknown thrown values", () => {
+    const error = new Error("boom");
+    expect(toError(error)).toBe(error);
+    expect(toError("boom").message).toBe("boom");
+    expect(toError({ reason: "boom" }).message).toBe("Unknown endpoint error");
   });
 });

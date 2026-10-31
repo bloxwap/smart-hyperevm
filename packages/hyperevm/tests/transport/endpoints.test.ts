@@ -14,6 +14,7 @@ import {
 import { hyperEvm } from "viem/chains";
 
 import { ChainMismatchError, TimeoutError } from "../../src/_errors.ts";
+import { defaultRegistry } from "../../src/registry/mod.ts";
 import { normalizeRpcUrl } from "../../src/registry/_url.ts";
 import { hyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
@@ -398,6 +399,27 @@ describe("errors that cannot be rewritten in place", () => {
     expectNoSecret([thrown, ...events].map(errorText).join("\n"));
   });
 
+  test("a non-configurable property named by a keyed URL is scrubbed in a copy", async () => {
+    const cause = new Error("upstream failed");
+    Object.defineProperty(cause, HYPERPC, { value: "unavailable", enumerable: true, configurable: false });
+    const keyed: Transport = () =>
+      createTransport(
+        {
+          key: "keyed",
+          name: "keyed",
+          type: "test",
+          retryCount: 0,
+          request: (async () => {
+            throw new BaseError("upstream failed", { cause });
+          }) as EIP1193RequestFn,
+        },
+        { url: HYPERPC },
+      );
+    const { thrown, events } = await failure({ endpoints: [keyed] });
+    expect(thrown).toBeInstanceOf(BaseError);
+    expectNoSecret([thrown, ...events].map(errorText).join("\n"));
+  });
+
   test("a frozen error a transport throws as is is replaced up to the top", async () => {
     const keyed: Transport = () =>
       createTransport(
@@ -460,6 +482,37 @@ describe("endpoint list validation", () => {
     expect(() => open({ endpoints: ["ftp://node.example.test/?apikey=HYPERPC_SECRET"] })).toThrow(
       /endpoints\[0\]: RPC URL must be http/,
     );
+  });
+
+  test("a child transport with a malformed reported URL falls back to its index label", () => {
+    const malformed: Transport = () =>
+      createTransport(
+        {
+          key: "malformed-url",
+          name: "malformed-url",
+          type: "test",
+          retryCount: 0,
+          request: (async () => "0x1") as EIP1193RequestFn,
+        },
+        { url: "not a url" },
+      );
+    const client = open({ endpoints: [malformed] });
+    expect(client.value?.endpoints).toEqual([{ id: "transport:0", url: "transport:0", weight: 1 }]);
+  });
+
+  test("the default endpoint list uses the shipped registry weights", () => {
+    const client = hyperevm({ ...BASELINE, headLag: false })({ timeout: 1_000 });
+    expect(client.value?.endpoints.length).toBeGreaterThan(0);
+    expect(client.value?.endpoints.every((endpoint) => endpoint.weight > 0)).toBe(true);
+  });
+
+  test("an empty shipped registry reports that no endpoints are eligible", () => {
+    const endpoints = defaultRegistry.endpoints.splice(0);
+    try {
+      expect(() => hyperevm({ ...BASELINE, headLag: false })({ timeout: 1_000 })).toThrow(/registry has none eligible/);
+    } finally {
+      defaultRegistry.endpoints.push(...endpoints);
+    }
   });
 });
 

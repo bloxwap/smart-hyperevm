@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { isWanchainHost, normalizeRpcUrl } from "../../src/registry/_url.ts";
+import { isWanchainHost, normalizeEndpointUrl, normalizeRpcUrl } from "../../src/registry/_url.ts";
 import {
   extractObjectBlock,
   parseChainlistChainFile,
@@ -103,6 +103,11 @@ describe("normalizeRpcUrl", () => {
     expect(() => normalizeRpcUrl("https://user:pass@rpc.example/evm")).toThrow(/credentials/);
     expect(() => normalizeRpcUrl("https://rpc.example/evm?key=1")).toThrow(/query/);
     expect(() => normalizeRpcUrl("ftp://rpc.example/evm")).toThrow(/http/);
+    expect(() => normalizeRpcUrl("not a url")).toThrow(/Invalid RPC URL/);
+  });
+
+  test("endpoint normalization also rejects malformed URLs", () => {
+    expect(() => normalizeEndpointUrl("not a url")).toThrow(/Invalid RPC URL/);
   });
 });
 

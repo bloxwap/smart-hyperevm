@@ -123,6 +123,11 @@ describe("defaultIsActive", () => {
     installDocument({ addEventListener() {}, removeEventListener() {} });
     expect(defaultIsActive()).toBe(true);
   });
+
+  test("ignores a document without visibility listeners", () => {
+    installDocument({ visibilityState: "hidden" });
+    expect(defaultIsActive()).toBe(true);
+  });
 });
 
 describe("hyperevm probes pause while inactive", () => {

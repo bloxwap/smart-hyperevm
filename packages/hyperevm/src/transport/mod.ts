@@ -1370,7 +1370,7 @@ function raceHedge(
       const started = startHedge(() => !settled);
       if (started === undefined) return;
       pending += 1;
-      if (started instanceof Promise) started.then(track, () => track(undefined));
+      if (started instanceof Promise) started.then(track);
       else track(started);
     }, waitMs);
     // The primary request keeps the process alive. The hedge timer alone should not.
@@ -1773,15 +1773,11 @@ function isPlainObject(value: object): boolean {
 
 /** The URL as viem prints it in errors, with basic-auth credentials removed. */
 function withoutCredentials(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.username === "" && parsed.password === "") return url;
-    parsed.username = "";
-    parsed.password = "";
-    return parsed.toString();
-  } catch {
-    return url;
-  }
+  const parsed = new URL(url);
+  if (parsed.username === "" && parsed.password === "") return url;
+  parsed.username = "";
+  parsed.password = "";
+  return parsed.toString();
 }
 
 function toChildTransport(

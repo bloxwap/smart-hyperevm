@@ -205,6 +205,11 @@ describe("planFor", () => {
       to: "latest",
     });
     expect(planFor("eth_getLogs", [{ blockHash: HASH }])?.kind).toBe("immutable");
+    expect(planFor("eth_chainId", undefined)).toMatchObject({ kind: "immutable", params: [] });
+    expect(planFor("eth_call", [TX, { blockNumber: "0x64" }])).toMatchObject({
+      kind: "number",
+      block: 100,
+    });
   });
 
   test("an explicit memo reuses plans only for the same params array", () => {
@@ -542,6 +547,27 @@ describe("eth_getLogs index", () => {
     expect(a.count("eth_getLogs")).toBe(3);
   });
 
+  test("an overlapping range replaces its indexed blocks without duplicating logs", async () => {
+    const a = logsNode("a", { value: 101 }, TABLE);
+    const client = open({ endpoints: [{ transport: a.transport, label: "a" }], isActive: () => false });
+    await client.value.probe();
+    await client.request({
+      method: "eth_getLogs",
+      params: [{ address: ADDRESS, fromBlock: hex(80), toBlock: hex(100) }],
+    });
+    await client.request({
+      method: "eth_getLogs",
+      params: [{ address: ADDRESS, fromBlock: hex(95), toBlock: hex(101) }],
+    });
+    expect(
+      await client.request({
+        method: "eth_getLogs",
+        params: [{ address: ADDRESS, fromBlock: hex(80), toBlock: hex(101) }],
+      }),
+    ).toEqual([log(80, 0), log(95, 0), log(100, 0), log(100, 1), log(101, 0)]);
+    expect(a.count("eth_getLogs")).toBe(2);
+  });
+
   test("a miss whose index covers the start fetches the missing tail and answers from memory", async () => {
     const head = { value: 100 };
     const a = logsNode("a", head, TABLE);
@@ -752,6 +778,30 @@ describe("background refresh", () => {
     // Within maxStaleBlocks, the old entry still serves.
     expect(await client.request({ method: "eth_call", params: [TX] })).toBe("0x1");
     expect(a.count("eth_call")).toBe(2);
+  });
+
+  test("a failed head tick leaves the hot key available for a later tick", async () => {
+    const transport: Transport = () =>
+      createTransport({
+        key: "failed-head",
+        name: "failed-head",
+        type: "test",
+        retryCount: 0,
+        request: (async ({ method }: EIP1193Parameters) => {
+          if (method === "eth_blockNumber") throw new Error("head unavailable");
+          return "0x1";
+        }) as EIP1193RequestFn,
+      });
+    const client = open({
+      endpoints: [{ transport, label: "a" }],
+      cache: { refreshInterval: 5 },
+      pinLatest: false,
+      retryCount: 0,
+    });
+    await client.request({ method: "eth_call", params: [TX] });
+    await until(() => client.events.some((event) => event.type === "error" && event.method === "eth_blockNumber"));
+    expect(client.value.cacheStats().hotKeys).toBe(1);
+    client.value.close();
   });
 
   test("the tick probes one endpoint per interval, refreshes precompile reads, and stops once keys go idle", async () => {
