@@ -45,6 +45,24 @@ Three consecutive endpoint failures eject an endpoint for 5 seconds. Each later 
 
 Routing skips ejected endpoints while any other candidate is left. When every endpoint is ejected before a call starts, its first attempt still goes to the best one, so a call always has somewhere to go. Otherwise nothing is sent to an endpoint that is ejected at the moment of sending: a call does not fail over into one or send it a chain check, and hedges never target one. If only ejected endpoints are left, the call starts another round on the endpoints that already failed it instead. After every wait (a chain check, `retryDelay`, a backoff) the call picks again against the breaker as it is then, so a cooldown another call opened during the wait is respected. A call waits out ejections for at most 2 seconds in total, and otherwise stops with its last error. Probes skip ejected endpoints until the cooldown ends, so a provider that asked for 30 seconds gets them. With three endpoints all returning 429, ten calls cost 16 upstream requests instead of 30, or 17 counting the chain checks. Set `breaker: false` to turn it off, or pass `{ threshold, cooldown, maxCooldown }`.
 
+## Request budgets
+
+Public endpoints limit requests per IP. A budget keeps the transport under that limit instead of finding it with a 429. Give an endpoint `{ url, label, rps, burst }`, or every endpoint without its own a default with `budget: { rps, burst }`. `burst` defaults to `max(1, ceil(rps * 2))`. There is no budget unless you set one, and `budget: false` turns off the per-endpoint ones too.
+
+Each budgeted endpoint has a token bucket that starts full, holds `burst` tokens, and refills at `rps` per second. It refills from the clock when it is read, so it needs no timer. Every upstream request spends a token: calls, retries, hedges, chain checks, and head probes. The buckets belong to the factory, so instances built with another timeout or chain spend the same budget. `snapshot()` shows whole tokens left as `tokens`, or `null` for an unlimited endpoint.
+
+Routing skips a spent endpoint while another candidate in the same breaker state has a token. A spent closed endpoint still comes before an ejected one with tokens, so the budget never sends a call into a cooldown. When every candidate is spent, the call waits for the first token. That wait shares the call's 2 second limit with ejection waits. Past it, the call throws `BudgetExhaustedError` with the endpoints' labels and the wait it would have needed, and sends nothing over the limit. If endpoints that already failed this call still have tokens, it starts another round on them first. The all-ejected exception does not override a budget: the first attempt may use an ejected endpoint only when it has a token, and otherwise waits or throws like any other call. A spent endpoint is not sent a chain check. Head probes and hedges skip spent endpoints instead of waiting. A send that waits for a token has not left the process, so non-idempotent methods keep their one-endpoint rule.
+
+The registry does not ship budgets. These are the rates the monorepo router uses for one IP. Only the official endpoint's is documented (about 100 requests a minute). The rest are guesses.
+
+| Endpoint | rps |
+| --- | --- |
+| `https://rpc.hyperliquid.xyz/evm` | 1.5 |
+| `https://rpc.purroofgroup.com`, `https://hyperliquid.drpc.org`, `https://999.rpc.thirdweb.com`, `https://rpc.hypurrscan.io` | 10 |
+| `https://hyperliquid-json-rpc.stakely.io`, `https://rpc.hyperlend.finance` | 5 |
+
+With the default 4 second probe, head probes alone spend 0.25 rps per endpoint.
+
 ## What is not retried
 
 These methods go to one endpoint and are never hedged:

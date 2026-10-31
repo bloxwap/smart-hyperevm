@@ -56,6 +56,8 @@ export interface ScoreboardOptions {
   now: () => number;
   /** Ejected endpoints. `pick` skips them unless every candidate is ejected. */
   ejected?: ((id: string) => boolean) | undefined;
+  /** Endpoints out of request budget. `pick` skips them unless every candidate in the same breaker state is. */
+  spent?: ((id: string) => boolean) | undefined;
 }
 
 /** Picks an endpoint and records what happened after the call. */
@@ -75,7 +77,10 @@ export class Scoreboard {
     this.#options = options;
   }
 
-  /** Lowest score, or the better of two randomly drawn endpoints. Ejected endpoints are a last resort. */
+  /**
+   * Lowest score, or the better of two randomly drawn endpoints. Ejected endpoints are a last resort.
+   * Spent endpoints come after funded ones of the same breaker state, never before a closed one.
+   */
   pick(
     method: string,
     exclude: ReadonlySet<string>,
@@ -85,7 +90,10 @@ export class Scoreboard {
     const eligible = this.#endpoints.filter((endpoint) => !exclude.has(endpoint.id) && endpoint.supports(method));
     const ejected = this.#options.ejected;
     const closed = ejected ? eligible.filter((endpoint) => !ejected(endpoint.id)) : eligible;
-    const candidates = closed.length > 0 ? closed : eligible;
+    const pool = closed.length > 0 ? closed : eligible;
+    const spent = this.#options.spent;
+    const funded = spent ? pool.filter((endpoint) => !spent(endpoint.id)) : pool;
+    const candidates = funded.length > 0 ? funded : pool;
     const chosen =
       candidates.length === 0
         ? undefined
@@ -166,7 +174,7 @@ export class Scoreboard {
     return scaled > minDelay ? scaled : minDelay;
   }
 
-  snapshot(method: string): Omit<EndpointSnapshot, "quarantined">[] {
+  snapshot(method: string): Omit<EndpointSnapshot, "quarantined" | "tokens">[] {
     const view = this.#heads(this.#options.now());
     return this.#endpoints.map((endpoint) => ({
       id: endpoint.id,

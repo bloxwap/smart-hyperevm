@@ -24,7 +24,13 @@ import {
   type Transport,
 } from "viem";
 
-import { AllEndpointsFailedError, ChainMismatchError, TimeoutError, TransportClosedError } from "../_errors.ts";
+import {
+  AllEndpointsFailedError,
+  BudgetExhaustedError,
+  ChainMismatchError,
+  TimeoutError,
+  TransportClosedError,
+} from "../_errors.ts";
 import { defaultRegistry, registryHttpEndpoints } from "../registry/_registry.ts";
 import { type EndpointUrl, normalizeEndpointUrl } from "../registry/_url.ts";
 import {
@@ -35,6 +41,13 @@ import {
   DEFAULT_BREAKER_THRESHOLD,
   retryAfterMs,
 } from "./_breaker.ts";
+import {
+  type BudgetConfig,
+  type BudgetOptions,
+  Budgets,
+  resolveDefaultBudget,
+  resolveEndpointBudget,
+} from "./_budget.ts";
 import type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
 import {
   isAbortError,
@@ -53,6 +66,7 @@ import {
   parseQuantity,
 } from "./_scoreboard.ts";
 
+export type { BudgetOptions } from "./_budget.ts";
 export type { EndpointSnapshot, HyperevmEvent } from "./_events.ts";
 export {
   NON_IDEMPOTENT_METHODS,
@@ -146,6 +160,10 @@ export interface HyperevmEndpointConfig {
   label?: string | undefined;
   /** Routing weight above 0. Default: the registry weight, or 1. */
   weight?: number | undefined;
+  /** Sustained requests per second this endpoint allows. Replaces the transport `budget`. Default: that budget. */
+  rps?: number | undefined;
+  /** Bucket size for `rps`, at least 1. Default: `max(1, ceil(rps * 2))`. */
+  burst?: number | undefined;
 }
 
 /** A URL, a viem transport, or an {@link HyperevmEndpointConfig}. */
@@ -214,6 +232,13 @@ export interface HyperevmTransportOptions {
    */
   breaker?: boolean | BreakerOptions | undefined;
   /**
+   * Request budget for every endpoint without its own `rps`: a token bucket refilled at `rps`, holding `burst`.
+   * Every upstream request spends a token, probes and chain checks included. Routing skips a spent endpoint
+   * while another has budget. When none does, a call waits for the next token within the 2 second retry budget,
+   * or throws `BudgetExhaustedError`. `false` turns off every budget, per-endpoint ones too. Default: none.
+   */
+  budget?: BudgetOptions | false | undefined;
+  /**
    * Return true to stop failover, matching viem `fallback`'s `shouldThrow`.
    * Terminal errors (reverts, invalid params, aborts) already stop failover.
    */
@@ -277,6 +302,8 @@ interface BuiltEndpoint {
   supports: (method: string) => boolean;
   /** Milliseconds a recent rate-limited HTTP response asked for in `Retry-After`. Reading it clears it. */
   retryAfter: () => number;
+  /** Undefined when the endpoint is unlimited. */
+  budget: BudgetConfig | undefined;
 }
 
 interface Inflight {
@@ -418,6 +445,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
   const shared = new Map<string, ReturnType<Transport<"hyperevm", HyperevmTransportValue>>>();
   const rebroadcastRaw = options.rebroadcastRawTransactions ?? true;
   const breakerConfig = resolveBreaker(options.breaker);
+  // Per factory, not per instance: clients with another timeout still spend the same provider limit.
+  const budgets = new Budgets(now);
 
   return (parameters: {
     account?: unknown;
@@ -446,6 +475,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           : "hyperevm() requires at least one endpoint. `endpoints` is empty.",
       );
     }
+    for (const endpoint of built) budgets.configure(endpoint.id, endpoint.budget);
     const verifyChainId = options.verifyChainId ?? true;
     const expectedChainId = parameters.chain?.id ?? DEFAULT_CHAIN_ID;
     // A child whose `methods` filter rejects `eth_chainId` cannot be checked. Its filter is the caller's choice.
@@ -473,6 +503,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         config: { ...defaultScoreConfig, ...options.score },
         now,
         ejected: (id: string): boolean => breaker.isOpen(id),
+        spent: (id: string): boolean => !budgets.has(id),
       },
     );
     const listeners = new Set<(event: HyperevmEvent) => void>();
@@ -541,6 +572,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     /** Send one `eth_chainId` for `endpoint` and record it as the gate's shared check. */
     const startCheck = (endpoint: BuiltEndpoint, gate: ChainGate): Promise<Error | undefined> => {
       const started = now();
+      budgets.take(endpoint.id);
       const pending = withDeadline(endpoint.request({ method: "eth_chainId" }), timeout).then(
         (result): Error | undefined => {
           const chainId = parseQuantity(result);
@@ -597,7 +629,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       }
       if (skipEjected && breaker.isOpen(endpoint.id)) return undefined;
       const target = byId.get(endpoint.id);
-      if (!target || gates.get(endpoint.id)?.verified !== false) return endpoint;
+      // A spent pick is not checked. The caller waits for a token and picks again.
+      if (!target || gates.get(endpoint.id)?.verified !== false || !budgets.has(endpoint.id)) return endpoint;
       return untilAborted(checkChain(target), parent).then((reason) => {
         if (!reason) return false;
         exclude.add(endpoint.id);
@@ -626,6 +659,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       if (!target) throw new Error(`Unknown HyperEVM endpoint: ${endpoint.id}`);
       // Shared instances outlive the invocation that started an attempt, so the count expires on its own.
       const end = board.begin(endpoint.id, timeout + INFLIGHT_GRACE_MS);
+      budgets.take(endpoint.id);
       emit({ type: "request", endpoint: endpoint.url, method });
       const started = now();
       // The child sees the caller's signal only. A private AbortController would
@@ -723,16 +757,18 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       const lastResort = opening !== undefined && breaker.isOpen(opening.id);
       let previous: RankedEndpoint | undefined;
       let round = 0;
+      // Time spent waiting out ejections and budget refills together. It never passes MAX_RETRY_BACKOFF_MS.
       let ejectionWaitMs = 0;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         let wait = attempt > 0 ? retryDelay : 0;
         let mode = attempt === 0 ? routing : "best";
         let allowEjected = attempt === 0 && lastResort;
         let newRound = false;
+        let exhausted: BudgetExhaustedError | undefined;
         let endpoint: RankedEndpoint | undefined;
-        // Every await below (chain check, retryDelay, backoff, ejection wait) is followed by a fresh pick, so
-        // the breaker is judged as it is at dispatch. The pick that returns is synchronous, so `start()` counts
-        // it in flight before any other call picks.
+        // Every await below (chain check, retryDelay, budget refill, backoff, ejection wait) is followed by a fresh
+        // pick, so the breaker is judged as it is at dispatch. The pick that returns is synchronous, so `start()`
+        // counts it in flight and spends its token before any other call picks.
         for (;;) {
           const picked = pickVerified(method, exclude, mode, parent, errors, !allowEjected);
           if (picked instanceof Promise) {
@@ -745,9 +781,23 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
             wait = 0;
             continue;
           }
-          if (picked) {
+          if (picked && budgets.has(picked.id)) {
             endpoint = picked;
             break;
+          }
+          if (picked) {
+            // Every candidate is out of budget. Wait for the first token while the call's 2 second budget allows.
+            const spent = spentPeers(picked, method, exclude);
+            // At least 1ms, so a wait always draws on the call's budget.
+            const refillMs = Math.max(1, budgets.refillMs(spent));
+            if (ejectionWaitMs + refillMs <= MAX_RETRY_BACKOFF_MS) {
+              ejectionWaitMs += refillMs;
+              await delay(refillMs, parent);
+              continue;
+            }
+            exhausted = new BudgetExhaustedError(spent, refillMs);
+            // Endpoints that already failed this call may still have budget. Otherwise stop below the limit.
+            if (exclude.size === 0 || newRound) break;
           }
           if (exclude.size > 0 && !newRound) {
             // Every usable endpoint failed this call, or failed its chain check. Go back to them after a backoff.
@@ -770,7 +820,10 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           ejectionWaitMs += leftMs;
           await delay(leftMs, parent);
         }
-        if (!endpoint) break;
+        if (!endpoint) {
+          if (exhausted) errors.push(exhausted);
+          break;
+        }
         exclude.add(endpoint.id);
         if (previous && previous.id !== endpoint.id)
           emit({ type: "failover", from: previous.url, to: endpoint.url, method });
@@ -796,6 +849,20 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       throw new AllEndpointsFailedError(errors);
     };
 
+    /** Labels of the endpoints `picked` was chosen among: eligible, and in its breaker state. */
+    const spentPeers = (picked: RankedEndpoint, method: string, exclude: ReadonlySet<string>): string[] => {
+      const open = breaker.isOpen(picked.id);
+      return built
+        .filter(
+          (endpoint) =>
+            !exclude.has(endpoint.id) &&
+            !quarantined(endpoint.id) &&
+            endpoint.supports(method) &&
+            breaker.isOpen(endpoint.id) === open,
+        )
+        .map((endpoint) => endpoint.id);
+    };
+
     const dispatch = (
       endpoint: RankedEndpoint,
       method: string,
@@ -809,7 +876,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       const wait = board.hedgeDelay(endpoint.id, method, hedge.minDelay, hedge.multiplier);
       return raceHedge(primary, wait, (active) => {
         const next = board.pick(method, exclude, "best", random);
-        if (!next || breaker.isOpen(next.id)) return undefined;
+        // A hedge never waits for a token.
+        if (!next || breaker.isOpen(next.id) || !budgets.has(next.id)) return undefined;
         exclude.add(next.id);
         const launch = (): Inflight => {
           emit({ type: "hedge", endpoint: next.url, method });
@@ -820,7 +888,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         // An unverified backup is checked now. With probes off, nothing else would ever check it for a hedge.
         return untilAborted(checkChain(target), parent).then(
           // A concurrent call may have ejected the backup while it was checked.
-          (reason) => (reason || !active() || breaker.isOpen(next.id) ? undefined : launch()),
+          (reason) => (reason || !active() || breaker.isOpen(next.id) || !budgets.has(next.id) ? undefined : launch()),
           () => undefined,
         );
       });
@@ -832,11 +900,12 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       if (closed) return Promise.resolve();
       // An ejected endpoint is left alone until its cooldown ends. The provider may have asked for the quiet.
       // A child whose `methods` filter rejects `eth_blockNumber` is never probed: viem would refuse it locally.
+      // A spent endpoint is skipped, not waited for, and so is one whose chain check took its last token.
       const pending = built.map((endpoint) =>
-        breaker.isOpen(endpoint.id) || !endpoint.supports("eth_blockNumber")
+        breaker.isOpen(endpoint.id) || !endpoint.supports("eth_blockNumber") || !budgets.has(endpoint.id)
           ? Promise.resolve()
           : checkChain(endpoint).then((reason) =>
-              reason
+              reason || !budgets.has(endpoint.id)
                 ? undefined
                 : start(endpoint, "eth_blockNumber", [], undefined, false, false).promise.then(
                     () => undefined,
@@ -881,7 +950,9 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         };
       },
       snapshot: (method = "eth_call"): readonly EndpointSnapshot[] =>
-        board.snapshot(method).map((entry) => ({ ...entry, quarantined: quarantined(entry.id) })),
+        board
+          .snapshot(method)
+          .map((entry) => ({ ...entry, quarantined: quarantined(entry.id), tokens: budgets.remaining(entry.id) })),
       endpoints: built.map((endpoint) => ({ id: endpoint.id, url: endpoint.url, weight: endpoint.weight })),
       probe,
       close(): void {
@@ -1049,6 +1120,7 @@ interface PendingEndpoint {
   /** Spellings of the URL to scrub from errors. */
   secrets: string[];
   hint: RetryHint;
+  budget: BudgetConfig | undefined;
 }
 
 /**
@@ -1083,6 +1155,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
   const inputs: readonly HyperevmEndpoint[] =
     options.endpoints ?? registryHttpEndpoints().map((endpoint) => endpoint.url);
   const pending: PendingEndpoint[] = [];
+  const fallbackBudget = resolveDefaultBudget(options.budget);
   const urls = new Set<string>();
   const labels = new Set<string>();
   inputs.forEach((input, index) => {
@@ -1117,6 +1190,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
       instance,
       secrets: secrets.filter((secret): secret is string => secret !== undefined),
       hint,
+      budget: resolveEndpointBudget(config, fallbackBudget, `hyperevm() endpoints[${index}]`),
     });
   });
   return pending.map((entry) => {
@@ -1130,6 +1204,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
       supports: (method: string): boolean => supportsMethod(methods, method),
       request: redactErrors(instance.request as BuiltEndpoint["request"], entry.secrets, label),
       retryAfter: entry.hint.take,
+      budget: entry.budget,
     };
   });
 }

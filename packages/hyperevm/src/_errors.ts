@@ -56,6 +56,26 @@ export class ChainMismatchError extends BaseError {
   }
 }
 
+/**
+ * Thrown when every endpoint that could serve a call is out of request budget, and the next token comes later
+ * than the call may wait. Nothing was sent past the budget. `endpoints` holds public labels.
+ */
+export class BudgetExhaustedError extends BaseError {
+  readonly endpoints: readonly string[];
+  /** Milliseconds until the first of `endpoints` has a token. */
+  readonly refillMs: number;
+
+  constructor(endpoints: readonly string[], refillMs: number) {
+    super("HyperEVM request budget exhausted.", {
+      details: `${endpoints.join(", ")} next token in ${refillMs}ms`,
+      name: "BudgetExhaustedError",
+    });
+    this.name = "BudgetExhaustedError";
+    this.endpoints = endpoints;
+    this.refillMs = refillMs;
+  }
+}
+
 /** Thrown by `request()` after `value.close()`. Instantiate the transport again to keep going. */
 export class TransportClosedError extends BaseError {
   constructor() {
