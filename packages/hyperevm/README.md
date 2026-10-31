@@ -10,11 +10,29 @@
 
 ## Features
 
+- **Adaptive RPC routing**: Scores endpoints by per-method latency, tail latency, errors, in-flight load, and block-head lag, then routes each read to the best available nodes.
+- **Parallel racing and failover**: Races the two best-scored endpoints, supports timed hedging, and fails over on network errors and rate limits. Circuit breakers and request budgets keep unhealthy or exhausted endpoints out of rotation.
+- **Sub-millisecond warm reads**: Caches recent and immutable reads, refreshes hot keys in the background on new blocks, and answers `eth_blockNumber` locally when a fresh head is known.
+- **Incremental log indexing**: Keeps a rolling 1,000-block `eth_getLogs` index and fetches only new blocks after the initial scan. Binary search and incremental merges keep lookups and updates cheap.
+- **Consistent multi-node reads**: Pins `"latest"` to a block every selected endpoint holds, preventing block mismatches when consecutive reads use different nodes.
+- **Efficient request handling**: Coalesces identical in-flight reads, supports viem HTTP batching, and memoizes cache plans and routing views to reduce CPU work.
+- **Warm start and lifecycle controls**: Restores previous endpoint scores, pauses background work in hidden tabs, and stops timers when idle or closed.
 - **Typed**: Source code is 100% TypeScript.
 - **Tested**: Offline unit tests run in CI.
 - **Minimal dependencies**: viem is a peer. The package has no runtime dependencies of its own.
-- **Cross-Environment Support**: Compatible with Bun, Node.js, and other JS runtimes that provide `fetch`.
-- **Integratable**: A drop-in viem `Transport` for `createPublicClient`.
+- **Cross-environment support**: Compatible with Bun, Node.js, browsers, and edge runtimes that provide `fetch`.
+- **Easy integration**: A drop-in viem `Transport` for `createPublicClient`.
+
+## Performance
+
+One live HyperEVM run compared a direct connection to the official Hyperliquid RPC using viem `http()` with the tuned, cached `hyperevm()` configuration. The workload combined block-number, multicall, precompile, log, and balance reads. Latencies are p95 at the transport's `request`; lower is better.
+
+| Transport | Sequential, all reads | Sequential, warm reads | Concurrent, mostly warm | Errors (sequential / concurrent) |
+| --- | ---: | ---: | ---: | ---: |
+| Direct official Hyperliquid RPC (`viem http()`) | 375 ms | 375 ms | 144 ms | 73% / 85% |
+| `hyperevm()` tuned + cache | 164 ms | **0.14 ms** | **0.19 ms** | **0% / 0%** |
+
+The tuned settings are now the defaults. Cold reads still require the network; the 164 ms sequential p95 includes the initial full log scan. The concurrent phase started with a warm cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. The direct official RPC's errors were rate limiting. See the [full benchmark methodology and results](../../docs/benchmarks.md#read-cache).
 
 ## Documentation
 
