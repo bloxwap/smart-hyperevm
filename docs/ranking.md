@@ -49,15 +49,6 @@ Three consecutive endpoint failures eject an endpoint for 5 seconds. Each later 
 
 Routing skips ejected endpoints while any other candidate is left. When every endpoint is ejected before a call starts, its first attempt still goes to the best one, so a call always has somewhere to go. Otherwise nothing is sent to an endpoint that is ejected at the moment of sending: a call does not fail over into one or send it a chain check, and hedges never target one. If only ejected endpoints are left, the call starts another round on the endpoints that already failed it instead. After every wait (a chain check, `retryDelay`, a backoff) the call picks again against the breaker as it is then, so a cooldown another call opened during the wait is respected. A call waits out ejections for at most 2 seconds in total, and otherwise stops with its last error. Probes skip ejected endpoints until the cooldown ends, so a provider that asked for 30 seconds gets them. With three endpoints all returning 429, ten calls cost 16 upstream requests instead of 30, or 17 counting the chain checks. Set `breaker: false` to turn it off, or pass `{ threshold, cooldown, maxCooldown }`.
 
-## Pinned latest
-
-Endpoints a block or two apart answer `"latest"` for different blocks. A client that reads `eth_blockNumber` from one node and then asks another for `eth_getLogs` from that block can get an invalid-range error, or logs that stop short. `pinLatest` is off by default. With it on, an idempotent read's `"latest"` tag, given or implied, is rewritten to a concrete block: the lowest trusted head seen in the last `freshMs` (default 1000) among the endpoints that may serve the call. Those are endpoints that passed their chain check, are not quarantined or ejected, support the method, and are within `maxLag` of the highest such head. A head ignored as implausible does not count. With no such head, the tag passes through. Every attempt, failover, and hedge of one call uses the same block.
-
-The tag is found in `eth_call`, `eth_getBalance`, `eth_getCode`, and `eth_getTransactionCount` (param 1), `eth_getStorageAt` (param 2), `eth_getBlockByNumber` (param 0), `eth_feeHistory` (param 1), `eth_estimateGas` (param 1, only when given, since some nodes estimate against `"pending"` without one), an EIP-1898 `{ blockNumber: "latest" }`, and an `eth_getLogs` filter's `fromBlock` and `toBlock`, where an omitted bound means `"latest"`. A filter with `blockHash` is left alone, and so is a range that pinning would invert, such as a `fromBlock` above the pinned block. `"pending"`, `"safe"`, `"finalized"`, `"earliest"`, numbers, and `{ blockHash }` are never changed. The caller's params are copied, not mutated. Methods in the non-idempotent list are never pinned.
-
-While a pin exists, `eth_blockNumber` is answered locally with the same block, so the number a client reads is one the next read can be served at. Otherwise it goes upstream. Answers from one instance never go backwards, upstream ones included. Set `pinLatest: { blockNumber: false }` to keep `eth_blockNumber` upstream. Heads come from probes and from `eth_blockNumber` answers, so pinning works with `probeInterval: false`: a stale head sends the next `eth_blockNumber` upstream, and its answer is fresh again. With `headLag: false` there are no heads, and pinning does nothing.
-
-An endpoint with no fresh head is not part of the floor, and the call may still be routed to it. With the default 4 second probe interval, probe heads alone are fresh about a quarter of the time.
 ## Request budgets
 
 Public endpoints limit requests per IP. A budget keeps the transport under that limit instead of finding it with a 429. Give an endpoint `{ url, label, rps, burst }`, or every endpoint without its own a default with `budget: { rps, burst }`. `burst` defaults to `max(1, ceil(rps * 2))`. There is no budget unless you set one, and `budget: false` turns off the per-endpoint ones too.
@@ -98,9 +89,20 @@ Hedging is off unless you set `hedge`. When it is on, an idempotent read that is
 
 Racing is off unless you set `race`. It costs `width` upstream requests per read, which counts against public rate limits and paid-provider quotas. With `race: true` (width 2) or `race: { width }`, the first attempt of an idempotent read goes to the best-scored endpoints at once, in score order rather than by power of two choices. The first answer wins. A racer that fails does not fail the call while another is still running. A terminal answer (a revert, invalid params, a caller abort) settles the race at once, since the failover loop would stop on it anyway. When every racer fails, the call fails over to endpoints it has not tried, and `AllEndpointsFailedError` holds each racer's error. Later attempts do not race.
 
-Only endpoints that have passed their chain check, are not quarantined, and are not ejected at dispatch are raced. An unverified endpoint is skipped and checked in the background, so the next call can race it. When every endpoint is ejected, the availability exception sends the first attempt to one endpoint and nothing races. Sends and the other methods in the next section never race.
+Only endpoints that have passed their chain check, are not quarantined, are not ejected at dispatch, and hold a budget token are raced. An unverified endpoint is skipped and checked in the background, so the next call can race it, unless it is out of budget. A race never waits for a token, so a spent endpoint narrows it instead. When every endpoint is ejected, the availability exception sends the first attempt to one endpoint and nothing races. Sends and the other methods in [What is not retried](#what-is-not-retried) never race.
 
 Losers are not cancelled. They run to their own deadline and record their latency and errors like any call, so each race re-measures the runner-up and the ranking follows whichever endpoint is fastest now. A loser the caller aborts records nothing, and its in-flight count ends with it. A `race` event lists the racers, best first, and each racer also gets a `request` event. With `hedge` on as well, the hedge adds the next endpoint after its delay on top of the racers.
+
+## Pinned latest
+
+Endpoints a block or two apart answer `"latest"` for different blocks. A client that reads `eth_blockNumber` from one node and then asks another for `eth_getLogs` from that block can get an invalid-range error, or logs that stop short. `pinLatest` is off by default. With it on, an idempotent read's `"latest"` tag, given or implied, is rewritten to a concrete block: the lowest trusted head seen in the last `freshMs` (default 1000) among the endpoints that may serve the call. Those are endpoints that passed their chain check, are not quarantined or ejected, support the method, and are within `maxLag` of the highest such head. A head ignored as implausible does not count. With no such head, the tag passes through. Every attempt, failover, and hedge of one call uses the same block.
+
+The tag is found in `eth_call`, `eth_getBalance`, `eth_getCode`, and `eth_getTransactionCount` (param 1), `eth_getStorageAt` (param 2), `eth_getBlockByNumber` (param 0), `eth_feeHistory` (param 1), `eth_estimateGas` (param 1, only when given, since some nodes estimate against `"pending"` without one), an EIP-1898 `{ blockNumber: "latest" }`, and an `eth_getLogs` filter's `fromBlock` and `toBlock`, where an omitted bound means `"latest"`. A filter with `blockHash` is left alone, and so is a range that pinning would invert, such as a `fromBlock` above the pinned block. `"pending"`, `"safe"`, `"finalized"`, `"earliest"`, numbers, and `{ blockHash }` are never changed. The caller's params are copied, not mutated. Methods in the non-idempotent list are never pinned.
+
+While a pin exists, `eth_blockNumber` is answered locally with the same block, so the number a client reads is one the next read can be served at. Otherwise it goes upstream. Answers from one instance never go backwards, upstream ones included. Set `pinLatest: { blockNumber: false }` to keep `eth_blockNumber` upstream. Heads come from probes and from `eth_blockNumber` answers, so pinning works with `probeInterval: false`: a stale head sends the next `eth_blockNumber` upstream, and its answer is fresh again. With `headLag: false` there are no heads, and pinning does nothing.
+
+An endpoint with no fresh head is not part of the floor, and the call may still be routed to it. With the default 4 second probe interval, probe heads alone are fresh about a quarter of the time.
+
 ## Coalescing
 
 Identical idempotent reads that are in flight at the same time share one upstream request. Two calls are identical when the method and params match, with object keys sorted. A bigint param never matches a string or number param. The shared request goes through the same routing, failover, breaker, and chain checks as any call, and every caller gets its result or its error. A caller that joins fires a `coalesce` event and sends nothing of its own. The entry is dropped as soon as the request settles, so nothing is cached and memory is bounded by the calls in flight. Each `hyperevm()` instance has its own table.
@@ -110,6 +112,7 @@ Sends, methods in the non-idempotent list or `nonIdempotentMethods`, subscriptio
 Each caller waits under its own abort signal. A caller that aborts is rejected with its own reason, and the others keep waiting. The shared request is cancelled only when every waiting caller has aborted. A caller without a signal keeps it running. A cancelled request leaves the table at once, so a later caller starts a fresh one and never inherits an aborted signal. A request whose first caller has no signal is sent without one, so viem's HTTP batching still groups it. On Workers the invocation that started a request can end and take it with it, so its promise may never settle. A caller waits on another caller's request until one `timeout` after that request started, then starts its own, and the old request is not joined again.
 
 Set `coalesce: false` to send every call.
+
 ## Warm start
 
 A new instance starts cold: every endpoint scores as `priorMs` until it answers. `value.scores()` returns what the instance has learned as versioned JSON (`version: 1`, `savedAt`, and each endpoint's books by label and method, with `"*"` for the global book). `value.restoreScores(snapshot)` seeds a new instance from it. Heads, breaker state, and chain checks are never saved, so a new session probes heads, re-checks `eth_chainId` before an endpoint's first call, and starts with every circuit closed.
@@ -119,6 +122,28 @@ A restored book is a prior. It fills only a book with no samples, counts as at m
 Storage is untrusted. Restore accepts a snapshot or its JSON (at most 256 KiB), ignores unknown endpoint labels, method names that are not identifiers, more than 32 books per endpoint, books with a missing or non-finite field, and snapshots or books older than `maxAge` (default 1 hour) or more than a minute in the future. Latencies are clamped to the instance's `timeout`, error rates to 0 to 1.
 
 `persist: { load, save }` does this for you. `load` runs once, on the instance's first request, so building a client at module scope on Workers does no I/O. A load that returns synchronously, or a promise that has already settled, seeds the first pick. A slower one lands when it settles and never delays or fails a call. `save` runs at most every `saveInterval` (default 10 seconds) on an unref'd timer, and on `close()`. Nothing is saved until the load settles, so a slow load cannot be overwritten by an empty snapshot. A load or save that throws or rejects, or a stored value that is not a snapshot, fires a `persist` event. `localStoragePersistence(key)` uses `globalThis.localStorage`, and loads and saves nothing where it is missing or blocked (Workers, Node, React Native, private modes). Snapshots carry labels, never key-bearing URLs.
+
+## Combining the router features
+
+Racing, pinning, coalescing, budgets, warm start, and the activity pause are separate options, and they compose in one order. A request first loads stored scores (`persist`), then pins `"latest"` (`pinLatest`), then joins or starts a shared request (`coalesce`), and only the shared request routes, races, hedges, and fails over. So:
+
+- Two spellings of one read that pin to the same block, such as an implied `"latest"`, an explicit one, and the pinned block number, share one request. A race is never joined halfway: callers join above it.
+- Every racer, hedge, and failover of a pinned read is sent the same block.
+- Racers, hedges, chain checks, and probes each spend a budget token. A spent endpoint is not raced, hedged, checked, or probed.
+- A locally answered `eth_blockNumber` sends nothing, so it spends no token and is not coalesced.
+- Restored scores feed the same scoreboard racing reads, so the first race of a session goes to the endpoints that were fastest last time.
+- While `isActive()` is false, probe ticks send nothing, and once active they still skip spent and ejected endpoints.
+- Methods that are not idempotent are never raced, pinned, or coalesced. Filters and subscriptions are not coalesced either.
+- `close()` stops the probe timer, removes the visibility listener, and saves scores once.
+
+| Option | Default | Section |
+| --- | --- | --- |
+| `race: boolean \| { width }` | off. `true` races 2 | [Racing](#racing) |
+| `pinLatest: boolean \| { freshMs, blockNumber }` | off. `freshMs` 1000, `blockNumber` true | [Pinned latest](#pinned-latest) |
+| `coalesce: boolean` | on | [Coalescing](#coalescing) |
+| `budget: { rps, burst } \| false`, endpoint `{ rps, burst }` | no budget. `burst` is `max(1, ceil(rps * 2))` | [Request budgets](#request-budgets) |
+| `persist: { load, save, maxAge, saveInterval }` | off. `maxAge` 1 hour, `saveInterval` 10 seconds | [Warm start](#warm-start) |
+| `isActive: () => boolean` | false only in a hidden browser tab | [Inactive pages and apps](#inactive-pages-and-apps) |
 
 ## Registry score
 
@@ -165,6 +190,7 @@ URLs with a query string, a username, or a hash are rejected. `http://` is rejec
 
 - There is no merged `value.subscribe`. A subscription stays on the socket that accepted `eth_subscribe`. viem's `fallback` has the same gap. HTTP endpoints do not serve subscriptions.
 - Race defaults off. Turning it on doubles upstream load at width 2. A later release may flip the default.
+- With `pinLatest` on, a pinned `eth_getBlockByNumber("latest")` is sent as a numbered fetch, so it no longer refreshes heads. Probes and upstream `eth_blockNumber` answers still do.
 - Hedge defaults off. A stall study is in [benchmarks.md](benchmarks.md). The cold hedge fires at `minDelay` (250ms), and several public nodes are slower than that, so those first calls would be duplicated.
 - The shipped history starts with one probe run. Full weight waits for the window above, so every endpoint in the first ranked file is on the new-node cap. The shipped file predates the precompile and range probes, so it reflects them only after the next `bun run rank`. Production services should pass explicit endpoints.
 - Snapshots do not show ejection state. Watch the `eject` and `restore` events.

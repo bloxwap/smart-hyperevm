@@ -117,13 +117,14 @@ const transport = hyperevm({
 - Pass a provider URL as a string or `{ url, label }`, not `http(url)`. viem drops the headers of a 429 or 503 whose body is a JSON-RPC error, so only a transport the package builds from a URL keeps the `Retry-After` the breaker honors.
 - Each endpoint's `eth_chainId` is checked before its first call. An endpoint on another chain is quarantined. Set `verifyChainId: false` to skip the check.
 - An endpoint with 3 consecutive failures, or a `Retry-After`, is ejected for a cooldown (`breaker`). Routing skips it unless every endpoint is ejected.
+- `{ url, label, rps, burst }`, or `budget: { rps, burst }` for every endpoint, keeps requests under a provider's limit with a token bucket. Probes and chain checks spend tokens too. When every endpoint is spent past the 2 second retry budget, the call throws `BudgetExhaustedError`. Default: no budget. The official endpoint allows about 1.5 rps per IP.
 - `pinLatest: true` rewrites `"latest"` on reads to a block every servable endpoint holds, and answers `eth_blockNumber` with it, so a block number from one node is one the next node can serve. Off by default.
 - Identical concurrent reads share one upstream request (`coalesce`, default on). Each caller gets its result or error, and nothing is cached after it settles. Sends and filters are never shared.
-- `{ url, label, rps, burst }`, or `budget: { rps, burst }` for every endpoint, keeps requests under a provider's limit with a token bucket. Probes and chain checks spend tokens too. When every endpoint is spent past the 2 second retry budget, the call throws `BudgetExhaustedError`. Default: no budget. The official endpoint allows about 1.5 rps per IP.
-- The probe timer starts on the first request and stops after `headLag.probeIdleTimeout` (60 seconds) without one. `transport.value.close()` stops it and rejects later requests with `TransportClosedError`.
+- The probe timer starts on the first request and stops after `headLag.probeIdleTimeout` (60 seconds) without one. `transport.value.close()` stops it, saves scores when `persist` is set, and rejects later requests with `TransportClosedError`.
 - Probe ticks pause while `isActive()` is false. In a browser that is a hidden tab, and the page becoming visible probes at once. In React Native, pass `isActive: () => AppState.currentState === "active"`.
-- The default registry pool rests on one probe run. Prefer explicit endpoints in a service.
 - `persist: localStoragePersistence("hyperevm:scores")` warm-starts a browser client from the last session's scores. Pass your own `{ load, save }` for other storage. Restored scores are priors that live samples replace. Heads, ejections, and chain checks are never saved. `value.scores()` and `value.restoreScores()` do the same by hand.
+- Racing, pinning, coalescing, budgets, warm start, and the probe pause compose. How, and every default, is in [Combining the router features](../../docs/ranking.md#combining-the-router-features).
+- The default registry pool rests on one probe run. Prefer explicit endpoints in a service.
 
 ### Observe
 

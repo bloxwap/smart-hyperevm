@@ -109,7 +109,9 @@ const transport = hyperevm({
 - **Build the transport once.** One `hyperevm()` factory shares a single instance (scores, breaker, probe timer) across every client built with the same timeout, retry count, and chain. Building it does no I/O and starts no timer. The head probe timer starts on the first request and stops after 60 seconds without one (`headLag.probeIdleTimeout`).
 - **Cloudflare Workers.** Create the transport in module scope so each isolate builds it once, and create clients per request. Set `headLag: { probeInterval: false }` so nothing runs outside a request. Heads then come only from the `eth_blockNumber` and `latest` block reads your own calls make.
 - **UI reads.** A per-attempt `timeout` of 3 to 4 seconds with `hedge: true` keeps a stalled node from holding a page. `options.timeout` wins over the client's `timeout`.
-- **Shutdown.** `transport.value.close()` stops the probe timer. Later requests on every client sharing that instance reject with `TransportClosedError`. The next client built from the factory gets a fresh instance.
+- **Rate limits.** Give an endpoint `{ url, rps, burst }`, or every endpoint `budget: { rps }`, and the transport stays under the provider's limit instead of finding it with a 429. Probes, chain checks, races, and hedges spend tokens too. The official endpoint allows about 1.5 requests a second per IP.
+- **Browsers.** Head probes pause while the tab is hidden (`isActive`). `persist: localStoragePersistence("hyperevm:scores")` warm-starts scores from the last session. Identical concurrent reads share one request (`coalesce`, on by default). `race: true` sends each read to the two best endpoints, and `pinLatest: true` pins `"latest"` to a block every endpoint holds. Both are off by default because they cost upstream requests or freshness.
+- **Shutdown.** `transport.value.close()` stops the probe timer and its visibility listener, and saves scores when `persist` is set. Later requests on every client sharing that instance reject with `TransportClosedError`. The next client built from the factory gets a fresh instance.
 
 ### Observe
 
@@ -123,7 +125,7 @@ const transport = hyperevm({
 });
 ```
 
-`onEvent` is telemetry. A throw inside the listener does not fail the request. Besides requests, successes, errors, failovers, hedges, and races, it reports `head` (with `trusted: false` when the head is ignored), `quarantine`, `eject`, and `restore`. `transport.value.snapshot(method)` returns the current scores for `method` (default `eth_call`), heads, lag, quarantine, and in-flight counts. The score, the registry window, and the anti-gaming rules are in [docs/ranking.md](docs/ranking.md).
+`onEvent` is telemetry. A throw inside the listener does not fail the request. Besides requests, successes, errors, failovers, hedges, and races, it reports `coalesce` (a call joined one in flight), `head` (with `trusted: false` when the head is ignored), `quarantine`, `eject`, `restore`, and `persist` (a score load or save failed). `transport.value.snapshot(method)` returns the current scores for `method` (default `eth_call`), heads, lag, quarantine, in-flight counts, and budget tokens left. The score, the registry window, and the anti-gaming rules are in [docs/ranking.md](docs/ranking.md).
 
 ## Documentation
 
