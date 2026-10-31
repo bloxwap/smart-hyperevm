@@ -1,7 +1,7 @@
 {
   "version": 1,
   "chainId": 999,
-  "updatedAt": "2026-10-30T22:26:01.293Z",
+  "updatedAt": "2026-10-31T16:46:51.848Z",
   "policy": {
     "windowMs": 2419200000,
     "minObservations": 3,
@@ -13,39 +13,18 @@
   },
   "endpoints": [
     {
-      "url": "https://hyperevm.rpc.sentio.xyz/",
+      "url": "https://rpc.hypurrscan.io/",
       "kind": "http",
-      "tracking": "limited",
+      "tracking": "unknown",
       "sources": [
         {
-          "name": "chainlist-extra",
-          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/extraRpcs.js"
+          "name": "chainlist",
+          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
         },
         {
           "name": "chainindex",
           "url": "https://www.chainindex.dev/chains/hyperevm"
-        }
-      ],
-      "submission": "upstream",
-      "addedAt": "2026-10-30T22:24:03.908Z",
-      "eligible": true,
-      "weight": 0.15,
-      "rank": 1,
-      "stats": {
-        "observations": 1,
-        "successes": 1,
-        "uptime": 1,
-        "latencyMs": 88.7,
-        "tailMs": 88.7,
-        "medianLag": 1,
-        "established": false
-      }
-    },
-    {
-      "url": "https://rpc.purroofgroup.com/",
-      "kind": "http",
-      "tracking": "unknown",
-      "sources": [
+        },
         {
           "name": "openchainbench",
           "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
@@ -55,15 +34,16 @@
       "addedAt": "2026-10-30T22:24:03.908Z",
       "eligible": true,
       "weight": 0.15,
-      "rank": 2,
+      "rank": 1,
       "stats": {
-        "observations": 1,
-        "successes": 1,
+        "observations": 2,
+        "successes": 2,
         "uptime": 1,
-        "latencyMs": 192.6,
-        "tailMs": 192.6,
-        "medianLag": 0,
-        "established": false
+        "latencyMs": 505.4,
+        "tailMs": 586.9,
+        "medianLag": 0.5,
+        "established": false,
+        "precompileOk": true
       }
     },
     {
@@ -92,15 +72,16 @@
       "addedAt": "2026-10-30T22:24:03.908Z",
       "eligible": true,
       "weight": 0.15,
-      "rank": 3,
+      "rank": 2,
       "stats": {
-        "observations": 1,
+        "observations": 2,
         "successes": 1,
-        "uptime": 1,
-        "latencyMs": 238.4,
+        "uptime": 0.5,
+        "latencyMs": 181,
         "tailMs": 238.4,
-        "medianLag": 1,
-        "established": false
+        "medianLag": 0.5,
+        "established": false,
+        "precompileOk": true
       }
     },
     {
@@ -125,30 +106,23 @@
       "addedAt": "2026-10-30T22:24:03.908Z",
       "eligible": true,
       "weight": 0.15,
-      "rank": 4,
+      "rank": 3,
       "stats": {
-        "observations": 1,
+        "observations": 2,
         "successes": 1,
-        "uptime": 1,
-        "latencyMs": 253.5,
-        "tailMs": 253.5,
-        "medianLag": 0,
-        "established": false
+        "uptime": 0.5,
+        "latencyMs": 260.4,
+        "tailMs": 267.3,
+        "medianLag": 0.5,
+        "established": false,
+        "precompileOk": true
       }
     },
     {
-      "url": "https://rpc.hypurrscan.io/",
+      "url": "https://rpc.purroofgroup.com/",
       "kind": "http",
       "tracking": "unknown",
       "sources": [
-        {
-          "name": "chainlist",
-          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
-        },
-        {
-          "name": "chainindex",
-          "url": "https://www.chainindex.dev/chains/hyperevm"
-        },
         {
           "name": "openchainbench",
           "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
@@ -158,44 +132,16 @@
       "addedAt": "2026-10-30T22:24:03.908Z",
       "eligible": true,
       "weight": 0.15,
-      "rank": 5,
+      "rank": 4,
       "stats": {
-        "observations": 1,
-        "successes": 1,
+        "observations": 2,
+        "successes": 2,
         "uptime": 1,
-        "latencyMs": 423.8,
-        "tailMs": 423.8,
-        "medianLag": 1,
-        "established": false
-      }
-    },
-    {
-      "url": "https://rpc.hyperlend.finance/",
-      "kind": "http",
-      "tracking": "unknown",
-      "sources": [
-        {
-          "name": "chainlist",
-          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
-        },
-        {
-          "name": "chainindex",
-          "url": "https://www.chainindex.dev/chains/hyperevm"
-        }
-      ],
-      "submission": "upstream",
-      "addedAt": "2026-10-30T22:24:03.908Z",
-      "eligible": true,
-      "weight": 0.15,
-      "rank": 6,
-      "stats": {
-        "observations": 1,
-        "successes": 1,
-        "uptime": 1,
-        "latencyMs": 1156.7,
-        "tailMs": 1156.7,
-        "medianLag": 0,
-        "established": false
+        "latencyMs": 152.8,
+        "tailMs": 192.6,
+        "medianLag": 35.5,
+        "established": false,
+        "precompileOk": true
       }
     },
     {
@@ -220,15 +166,46 @@
       "addedAt": "2026-10-30T22:24:03.908Z",
       "eligible": true,
       "weight": 0.15,
-      "rank": 7,
+      "rank": 5,
       "stats": {
-        "observations": 1,
-        "successes": 1,
+        "observations": 2,
+        "successes": 2,
         "uptime": 1,
-        "latencyMs": 1701.4,
+        "latencyMs": 1156.9,
         "tailMs": 1701.4,
         "medianLag": 10,
-        "established": false
+        "established": false,
+        "precompileOk": true
+      }
+    },
+    {
+      "url": "https://hyperevm.rpc.sentio.xyz/",
+      "kind": "http",
+      "tracking": "limited",
+      "sources": [
+        {
+          "name": "chainlist-extra",
+          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/extraRpcs.js"
+        },
+        {
+          "name": "chainindex",
+          "url": "https://www.chainindex.dev/chains/hyperevm"
+        }
+      ],
+      "submission": "upstream",
+      "addedAt": "2026-10-30T22:24:03.908Z",
+      "eligible": false,
+      "weight": 0,
+      "rank": null,
+      "stats": {
+        "observations": 2,
+        "successes": 1,
+        "uptime": 0.5,
+        "latencyMs": 125.1,
+        "tailMs": 161.5,
+        "medianLag": 1,
+        "established": false,
+        "precompileOk": false
       }
     },
     {
@@ -251,13 +228,14 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 1,
+        "observations": 2,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
         "tailMs": null,
         "medianLag": null,
-        "established": false
+        "established": false,
+        "precompileOk": null
       }
     },
     {
@@ -280,13 +258,14 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 1,
+        "observations": 2,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
         "tailMs": null,
         "medianLag": null,
-        "established": false
+        "established": false,
+        "precompileOk": null
       }
     },
     {
@@ -305,13 +284,44 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 1,
+        "observations": 2,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
         "tailMs": null,
         "medianLag": null,
-        "established": false
+        "established": false,
+        "precompileOk": null
+      }
+    },
+    {
+      "url": "https://rpc.hyperlend.finance/",
+      "kind": "http",
+      "tracking": "unknown",
+      "sources": [
+        {
+          "name": "chainlist",
+          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
+        },
+        {
+          "name": "chainindex",
+          "url": "https://www.chainindex.dev/chains/hyperevm"
+        }
+      ],
+      "submission": "upstream",
+      "addedAt": "2026-10-30T22:24:03.908Z",
+      "eligible": false,
+      "weight": 0,
+      "rank": null,
+      "stats": {
+        "observations": 2,
+        "successes": 1,
+        "uptime": 0.5,
+        "latencyMs": 1496.3,
+        "tailMs": 1496.3,
+        "medianLag": 0.5,
+        "established": false,
+        "precompileOk": false
       }
     },
     {
@@ -334,13 +344,14 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 1,
+        "observations": 2,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
         "tailMs": null,
         "medianLag": null,
-        "established": false
+        "established": false,
+        "precompileOk": null
       }
     },
     {

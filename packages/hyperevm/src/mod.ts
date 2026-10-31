@@ -23,7 +23,7 @@
  * @module
  */
 
-export { AllEndpointsFailedError, TimeoutError } from "./_errors.ts";
+export { AllEndpointsFailedError, ChainMismatchError, TimeoutError, TransportClosedError } from "./_errors.ts";
 export {
   HYPEREVM_CHAIN_ID,
   assertRegistryFile,
@@ -49,18 +49,23 @@ export {
 } from "./registry/mod.ts";
 export {
   NON_IDEMPOTENT_METHODS,
+  REBROADCAST_METHODS,
   blockNumberFromResult,
   defaultScoreConfig,
   endpointScore,
   hyperevm,
   inflation,
   isIdempotentMethod,
+  isRebroadcastMethod,
   parseQuantity,
   shouldFailover,
   type BatchOptions,
+  type BreakerOptions,
   type EndpointSnapshot,
   type HeadLagOptions,
   type HedgeOptions,
+  type HyperevmEndpoint,
+  type HyperevmEndpointConfig,
   type HyperevmEvent,
   type HyperevmTransportOptions,
   type HyperevmTransportValue,

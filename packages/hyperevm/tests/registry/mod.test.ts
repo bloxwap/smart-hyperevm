@@ -53,6 +53,26 @@ describe("assertRegistryFile", () => {
     expect(() => assertRegistryFile(registryFile("https://wandevs.org.evil.example/evm"))).not.toThrow();
     expect(() => assertRegistryFile(registryFile("https://rpc.example/wandevs.org"))).not.toThrow();
   });
+
+  test("accepts precompileOk as a boolean, null, or absent, and rejects anything else", () => {
+    const withStats = (precompileOk: unknown): unknown => {
+      const file = registryFile("https://rpc.example/evm") as { endpoints: Record<string, unknown>[] };
+      const stats: Record<string, unknown> = {
+        observations: 1,
+        successes: 1,
+        uptime: 1,
+        latencyMs: 100,
+        tailMs: 100,
+        medianLag: 0,
+        established: false,
+      };
+      if (precompileOk !== undefined) stats.precompileOk = precompileOk;
+      for (const endpoint of file.endpoints) endpoint.stats = stats;
+      return file;
+    };
+    for (const ok of [true, false, null, undefined]) expect(() => assertRegistryFile(withStats(ok))).not.toThrow();
+    expect(() => assertRegistryFile(withStats("yes"))).toThrow(/precompileOk/);
+  });
 });
 
 function registryFile(url: string): unknown {

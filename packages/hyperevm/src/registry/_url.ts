@@ -1,6 +1,7 @@
 /**
  * Canonical public RPC URLs. Query strings and credentials are rejected so a
  * contributed endpoint cannot smuggle an API key into the registry.
+ * Endpoints passed to the transport go through {@link normalizeEndpointUrl}, which keeps them.
  * @module
  */
 
@@ -38,6 +39,41 @@ export function normalizeRpcUrl(url: string): NormalizedRpcUrl {
   return {
     url: parsed.toString(),
     kind: websocket ? "websocket" : "http",
+  };
+}
+
+/** An explicit endpoint URL. `url` may hold a key, so only `origin` is safe to show. */
+export interface EndpointUrl extends NormalizedRpcUrl {
+  /** `scheme://host[:port]`. Never includes a path, query, or credentials. */
+  origin: string;
+}
+
+/**
+ * Normalize a URL the caller passed to the transport.
+ * Unlike {@link normalizeRpcUrl}, credentials and query strings are kept, because a
+ * private endpoint often carries its API key there. Errors never echo the URL.
+ */
+export function normalizeEndpointUrl(url: string): EndpointUrl {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    throw new Error("Invalid RPC URL.");
+  }
+  const websocket = parsed.protocol === "wss:" || parsed.protocol === "ws:";
+  const http = parsed.protocol === "https:" || parsed.protocol === "http:";
+  if (!websocket && !http) {
+    throw new Error("RPC URL must be http(s) or ws(s).");
+  }
+  parsed.hostname = parsed.hostname.toLowerCase();
+  parsed.hash = "";
+  if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+  }
+  return {
+    url: parsed.toString(),
+    kind: websocket ? "websocket" : "http",
+    origin: `${parsed.protocol}//${parsed.host}`,
   };
 }
 

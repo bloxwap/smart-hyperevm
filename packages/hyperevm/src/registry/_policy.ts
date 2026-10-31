@@ -34,6 +34,18 @@ export interface ProbeObservation {
   methods: Record<string, { ms: number; ok: boolean }>;
 }
 
+/**
+ * `methods` key for an `eth_call` to the HyperCore L1 block number read precompile.
+ * Observations written before this probe existed lack the key and are not punished for it.
+ */
+export const PRECOMPILE_PROBE = "hypercore_l1BlockNumber";
+
+/** `methods` key for an `eth_getLogs` over a 999-block range ending at the probed head. */
+export const LOGS_RANGE_PROBE = "eth_getLogs_range";
+
+/** Width of the {@link LOGS_RANGE_PROBE} query: one page for a client that stays under a 1,000-block provider cap. */
+export const LOGS_RANGE_BLOCKS = 999;
+
 /** An endpoint before rank, weight, and stats are filled in. */
 export interface RegistryEndpointInput {
   url: string;
@@ -53,6 +65,8 @@ export interface RegistryEndpointStats {
   tailMs: number | null;
   medianLag: number | null;
   established: boolean;
+  /** Latest {@link PRECOMPILE_PROBE} result in the window. `null` when no probe recorded it. */
+  precompileOk?: boolean | null | undefined;
 }
 
 /** One row of `registry/nodes.json`. */
@@ -203,6 +217,39 @@ function methodMedians(observations: readonly ProbeObservation[]): { typical: nu
   };
 }
 
+/** A missing key is an older observation, not a failure. */
+function probePassed(observation: ProbeObservation, method: string): boolean {
+  return observation.methods[method]?.ok !== false;
+}
+
+/** Up on chain 999 and, where recorded, able to serve a 999-block `eth_getLogs` and a HyperCore read. */
+function isSuccess(observation: ProbeObservation): boolean {
+  return (
+    observation.ok &&
+    observation.chainIdOk &&
+    probePassed(observation, LOGS_RANGE_PROBE) &&
+    probePassed(observation, PRECOMPILE_PROBE)
+  );
+}
+
+/**
+ * Latest precompile result from an observation that was otherwise up.
+ * A down node is uptime's concern; this asks only whether a live node serves HyperCore reads.
+ */
+function latestPrecompile(observations: readonly ProbeObservation[]): boolean | null {
+  let latestAt = Number.NEGATIVE_INFINITY;
+  let latest: boolean | null = null;
+  for (const observation of observations) {
+    const sample = observation.methods[PRECOMPILE_PROBE];
+    if (sample === undefined || !observation.ok || !observation.chainIdOk) continue;
+    const at = Date.parse(observation.at);
+    if (!Number.isFinite(at) || at < latestAt) continue;
+    latestAt = at;
+    latest = sample.ok;
+  }
+  return latest;
+}
+
 /** Same grace the transport uses. A block or two is probe skew, not a stale node. */
 const LAG_GRACE_BLOCKS = 2;
 
@@ -234,7 +281,9 @@ function applyShareCap(rows: RegistryEndpoint[], policy: RankPolicy): void {
 /**
  * Rank `endpoints` from `observations`. WebSocket URLs stay listed and are
  * excluded from the HTTP pool. HTTP URLs with no successful probe in the
- * window stay listed at weight 0.
+ * window stay listed at weight 0. A failed 999-block `eth_getLogs` or
+ * HyperCore read counts as a missed probe, and an endpoint whose latest
+ * HyperCore read failed is excluded from the default pool.
  */
 export function rankRegistry(
   endpoints: readonly RegistryEndpointInput[],
@@ -255,7 +304,7 @@ export function rankRegistry(
       };
     }
     const mine = freshObservations.filter((observation) => observation.url === endpoint.url);
-    const successes = mine.filter((observation) => observation.ok && observation.chainIdOk);
+    const successes = mine.filter(isSuccess);
     const uptime = mine.length === 0 ? 0 : successes.length / mine.length;
     const times = mine.map((observation) => Date.parse(observation.at)).filter((at) => Number.isFinite(at));
     times.sort((a, b) => a - b);
@@ -266,7 +315,9 @@ export function rankRegistry(
     const lags = mine.map((observation) => observation.lag).filter((lag): lag is number => lag !== null);
     const established =
       successes.length >= policy.minObservations && span >= policy.minSpanMs && uptime >= policy.minUptime;
-    const eligible = successes.length > 0 && uptime >= policy.minEligibleUptime && typical !== null;
+    const precompileOk = latestPrecompile(mine);
+    const eligible =
+      successes.length > 0 && uptime >= policy.minEligibleUptime && typical !== null && precompileOk !== false;
     const stats: RegistryEndpointStats = {
       observations: mine.length,
       successes: successes.length,
@@ -275,6 +326,7 @@ export function rankRegistry(
       tailMs: tail === null ? null : round(tail, 1),
       medianLag: median(lags) === null ? null : round(median(lags) ?? 0, 2),
       established,
+      precompileOk,
     };
     const weight = !eligible ? 0 : established ? 1 : policy.newNodeWeightCap;
     return {
@@ -308,4 +360,18 @@ export function rankRegistry(
       if (b.rank === null) return -1;
       return a.rank - b.rank;
     });
+}
+
+/**
+ * Why `next` must not replace `previous`, or undefined when it may.
+ * A run can pass every chain and head check and still leave no endpoint eligible, for example when each
+ * HyperCore read probe fails at once. Writing that registry would make the default transport throw.
+ */
+export function refuseRegistryRewrite(
+  previous: readonly RegistryEndpoint[],
+  next: readonly RegistryEndpoint[],
+): string | undefined {
+  if (!previous.some((endpoint) => endpoint.eligible)) return undefined;
+  if (next.some((endpoint) => endpoint.eligible)) return undefined;
+  return "Ranking left no endpoint eligible. Refusing to replace a registry that had eligible endpoints.";
 }

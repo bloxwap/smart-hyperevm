@@ -57,7 +57,11 @@
         "latencyMs": { "type": ["number", "null"] },
         "tailMs": { "type": ["number", "null"] },
         "medianLag": { "type": ["number", "null"] },
-        "established": { "type": "boolean" }
+        "established": { "type": "boolean" },
+        "precompileOk": {
+          "type": ["boolean", "null"],
+          "description": "Latest HyperCore read precompile probe in the window. False keeps the endpoint out of the default pool. Null or absent when no probe recorded it."
+        }
       }
     },
     "endpoint": {

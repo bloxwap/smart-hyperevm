@@ -1,15 +1,30 @@
 /**
  * Probe one HTTP endpoint. A wrong chain id is a failed observation and its
  * block number is not allowed to move the cohort's best head.
+ *
+ * Besides liveness, the probe checks the two reads papertrade-style clients
+ * lean on: a HyperCore read precompile and a 999-block `eth_getLogs`.
  * @module
  */
 
-import type { ProbeObservation } from "../src/registry/_policy.ts";
+import {
+  LOGS_RANGE_BLOCKS,
+  LOGS_RANGE_PROBE,
+  PRECOMPILE_PROBE,
+  type ProbeObservation,
+} from "../src/registry/_policy.ts";
 
 const EXPECTED_CHAIN_ID = 999;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const EMPTY_LOG_ADDRESS = "0x0000000000000000000000000000000000000001";
 const MAX_BODY = 1_000_000;
+/**
+ * HyperCore `l1BlockNumber` read precompile (`L1Read.sol`). Takes no arguments and
+ * returns the HyperCore block number as an ABI-encoded uint64, so a working node
+ * answers empty calldata with a non-zero 32-byte word.
+ * See https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm/interacting-with-hypercore
+ */
+export const L1_BLOCK_NUMBER_PRECOMPILE = "0x0000000000000000000000000000000000000809";
 
 export interface ProbeOptions {
   timeoutMs?: number | undefined;
@@ -42,6 +57,15 @@ export async function probeEndpoint(url: string, options: ProbeOptions = {}): Pr
   const callSample = await call(url, "eth_call", [{ to: ZERO_ADDRESS, data: "0x" }, "latest"], timeoutMs, fetchImpl);
   methods.eth_call = { ms: callSample.ms, ok: chainIdOk && callSample.ok };
 
+  const precompile = await call(
+    url,
+    "eth_call",
+    [{ to: L1_BLOCK_NUMBER_PRECOMPILE, data: "0x" }, "latest"],
+    timeoutMs,
+    fetchImpl,
+  );
+  methods[PRECOMPILE_PROBE] = { ms: precompile.ms, ok: chainIdOk && precompile.ok && isNonZeroWord(precompile.result) };
+
   if (head !== null) {
     const hex = `0x${head.toString(16)}`;
     const logs = await call(
@@ -52,8 +76,19 @@ export async function probeEndpoint(url: string, options: ProbeOptions = {}): Pr
       fetchImpl,
     );
     methods.eth_getLogs = { ms: logs.ms, ok: chainIdOk && logs.ok && Array.isArray(logs.result) };
+    // Same empty address over a full page: providers enforce range limits before they scan.
+    const from = `0x${Math.max(0, head - (LOGS_RANGE_BLOCKS - 1)).toString(16)}`;
+    const range = await call(
+      url,
+      "eth_getLogs",
+      [{ address: EMPTY_LOG_ADDRESS, fromBlock: from, toBlock: hex }],
+      timeoutMs,
+      fetchImpl,
+    );
+    methods[LOGS_RANGE_PROBE] = { ms: range.ms, ok: chainIdOk && range.ok && Array.isArray(range.result) };
   } else {
     methods.eth_getLogs = { ms: 0, ok: false };
+    methods[LOGS_RANGE_PROBE] = { ms: 0, ok: false };
   }
 
   const ok = chainIdOk && methods.eth_blockNumber?.ok === true;
@@ -151,6 +186,11 @@ function parseChainId(result: unknown): number | null {
   if (typeof result !== "string") return null;
   const parsed = result.startsWith("0x") ? Number.parseInt(result, 16) : Number.parseInt(result, 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** A 32-byte hex word with at least one non-zero nibble. */
+function isNonZeroWord(result: unknown): boolean {
+  return typeof result === "string" && /^0x[0-9a-fA-F]{64}$/.test(result) && /[1-9a-fA-F]/.test(result.slice(2));
 }
 
 function parseQuantity(result: unknown): number | null {

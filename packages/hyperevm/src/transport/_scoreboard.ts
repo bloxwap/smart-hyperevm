@@ -28,20 +28,34 @@ export interface ScoreboardEndpoint extends RankedEndpoint {
 }
 
 interface EndpointState extends ScoreboardEndpoint {
-  inflight: number;
+  /** Deadlines of the calls in flight. A call past its deadline no longer counts, whether or not it ended. */
+  inflight: Set<{ readonly until: number }>;
   head: number | null;
   headAt: number;
   global: MethodStat;
   methods: Map<string, MethodStat>;
 }
 
+/** Blocks a head may lead the other endpoints' median before it is ignored. */
+export const DEFAULT_MAX_AHEAD = 1_000;
+
+/**
+ * Generous ceiling on chain growth. HyperEVM makes about one small block per second.
+ * Used to carry an older head forward before comparing it with a newer one.
+ */
+const MAX_BLOCKS_PER_SECOND = 2;
+
 export interface ScoreboardOptions {
   perMethod: boolean;
   headLag: boolean;
   maxLag: number;
   staleMs: number;
+  /** Default: {@link DEFAULT_MAX_AHEAD}. */
+  maxAhead?: number | undefined;
   config?: ScoreConfig | undefined;
   now: () => number;
+  /** Ejected endpoints. `pick` skips them unless every candidate is ejected. */
+  ejected?: ((id: string) => boolean) | undefined;
 }
 
 /** Picks an endpoint and records what happened after the call. */
@@ -52,7 +66,7 @@ export class Scoreboard {
   constructor(endpoints: readonly ScoreboardEndpoint[], options: ScoreboardOptions) {
     this.#endpoints = endpoints.map((endpoint) => ({
       ...endpoint,
-      inflight: 0,
+      inflight: new Set(),
       head: null,
       headAt: 0,
       global: emptyStat(),
@@ -61,14 +75,17 @@ export class Scoreboard {
     this.#options = options;
   }
 
-  /** Lowest score, or the better of two randomly drawn endpoints. */
+  /** Lowest score, or the better of two randomly drawn endpoints. Ejected endpoints are a last resort. */
   pick(
     method: string,
     exclude: ReadonlySet<string>,
     mode: "best" | "p2c",
     random: () => number,
   ): RankedEndpoint | undefined {
-    const candidates = this.#endpoints.filter((endpoint) => !exclude.has(endpoint.id) && endpoint.supports(method));
+    const eligible = this.#endpoints.filter((endpoint) => !exclude.has(endpoint.id) && endpoint.supports(method));
+    const ejected = this.#options.ejected;
+    const closed = ejected ? eligible.filter((endpoint) => !ejected(endpoint.id)) : eligible;
+    const candidates = closed.length > 0 ? closed : eligible;
     const chosen =
       candidates.length === 0
         ? undefined
@@ -79,14 +96,24 @@ export class Scoreboard {
     return { id: chosen.id, url: chosen.url };
   }
 
-  begin(id: string): void {
+  /**
+   * Count a call in flight for at most `ttlMs`. Returns the function that ends it. Calling that again does nothing.
+   * The cap matters when the runtime drops the call's own cleanup, as Workers does with a cancelled invocation.
+   * Expired calls are collected here too, since a lone candidate is picked without being scored.
+   */
+  begin(id: string, ttlMs: number): () => void {
     const endpoint = this.#require(id);
-    endpoint.inflight += 1;
+    this.#inflight(endpoint);
+    const call = { until: this.#options.now() + ttlMs };
+    endpoint.inflight.add(call);
+    return (): void => {
+      endpoint.inflight.delete(call);
+    };
   }
 
-  end(id: string): void {
-    const endpoint = this.#require(id);
-    endpoint.inflight = Math.max(0, endpoint.inflight - 1);
+  /** Calls kept for `id`, expired ones included. Tests use this to check that expired calls are collected. */
+  held(id: string): number {
+    return this.#require(id).inflight.size;
   }
 
   success(id: string, method: string, latencyMs: number, sampleLatency: boolean): void {
@@ -112,14 +139,18 @@ export class Scoreboard {
     observe(this.#method(endpoint, method), latencyMs, false, config);
   }
 
-  /** Record a block number. Returns lag behind the best fresh head. */
-  noteHead(id: string, head: number): { best: number; lag: number } {
+  /**
+   * Record a block number. Returns lag behind the best believed head.
+   * `trusted` is false when no reference is believed or this head is ignored as implausible.
+   */
+  noteHead(id: string, head: number): { best: number; lag: number; trusted: boolean } {
     const endpoint = this.#require(id);
     const now = this.#options.now();
     endpoint.head = head;
     endpoint.headAt = now;
-    const best = this.#bestHead(now) ?? head;
-    return { best, lag: Math.max(0, best - head) };
+    const view = this.#heads(now);
+    const best = view.best ?? head;
+    return { best, lag: Math.max(0, best - head), trusted: view.best !== null && !view.liars.has(endpoint) };
   }
 
   /**
@@ -135,14 +166,15 @@ export class Scoreboard {
     return scaled > minDelay ? scaled : minDelay;
   }
 
-  snapshot(method: string): EndpointSnapshot[] {
+  snapshot(method: string): Omit<EndpointSnapshot, "quarantined">[] {
+    const view = this.#heads(this.#options.now());
     return this.#endpoints.map((endpoint) => ({
       id: endpoint.id,
       url: endpoint.url,
       weight: endpoint.weight,
-      inflight: endpoint.inflight,
+      inflight: this.#inflight(endpoint),
       head: endpoint.head,
-      lag: this.#lag(endpoint),
+      lag: this.#lag(endpoint, view),
       score: this.#score(endpoint, method),
       methods: Object.fromEntries([
         ["*", copyStat(endpoint.global)],
@@ -170,18 +202,24 @@ export class Scoreboard {
       global: endpoint.global,
       method: endpoint.methods.get(method),
       perMethod: this.#options.perMethod,
-      inflight: endpoint.inflight,
+      inflight: this.#inflight(endpoint),
       lagPenalty: this.#lagPenalty(endpoint),
       weight: endpoint.weight,
       config: this.#options.config ?? defaultScoreConfig,
     });
   }
 
-  #lag(endpoint: EndpointState): number | null {
-    if (endpoint.head === null) return null;
-    const best = this.#bestHead(this.#options.now());
-    if (best === null) return null;
-    return Math.max(0, best - endpoint.head);
+  /** Calls in flight that are still inside their deadline. Expired ones are dropped. */
+  #inflight(endpoint: EndpointState): number {
+    const now = this.#options.now();
+    for (const call of endpoint.inflight) if (call.until <= now) endpoint.inflight.delete(call);
+    return endpoint.inflight.size;
+  }
+
+  /** Null when there is no head, no believed reference, or this endpoint's head is ignored. */
+  #lag(endpoint: EndpointState, view: HeadView): number | null {
+    if (endpoint.head === null || view.best === null || view.liars.has(endpoint)) return null;
+    return Math.max(0, view.best - endpoint.head);
   }
 
   #config(): ScoreConfig {
@@ -190,19 +228,47 @@ export class Scoreboard {
 
   #lagPenalty(endpoint: EndpointState): number {
     if (!this.#options.headLag) return 1;
-    const lag = this.#lag(endpoint);
+    const view = this.#heads(this.#options.now());
+    if (endpoint.head !== null && view.best !== null && view.liars.has(endpoint)) {
+      // A head the others cannot corroborate is broken, not best. Score it as if it lagged by as much as it leads.
+      return 1 + this.#config().lagWeight * (endpoint.head - view.best);
+    }
+    const lag = this.#lag(endpoint, view);
     if (lag === null || lag <= this.#options.maxLag) return 1;
     return 1 + this.#config().lagWeight * (lag - this.#options.maxLag);
   }
 
-  #bestHead(now: number): number | null {
-    let best: number | null = null;
+  /**
+   * The reference head, and the endpoints whose heads are ignored.
+   *
+   * A fresh head is implausible when it leads the median of the other fresh heads by more than `maxAhead`.
+   * Older heads are carried forward at {@link MAX_BLOCKS_PER_SECOND} before the comparison. The reference is
+   * the highest head that is not implausible, so one broken endpoint cannot make every honest node look behind.
+   *
+   * One fresh head is its own reference. Two fresh heads more than `maxAhead` apart leave no reference:
+   * either one could be broken, so lag stops counting until a third head breaks the tie.
+   * With three or more the majority wins, so a leader is ignored only when most of the others agree it is too far ahead.
+   */
+  #heads(now: number): HeadView {
+    const fresh: HeadSample[] = [];
     for (const endpoint of this.#endpoints) {
       if (endpoint.head === null) continue;
       if (now - endpoint.headAt > this.#options.staleMs) continue;
-      if (best === null || endpoint.head > best) best = endpoint.head;
+      fresh.push({ endpoint, head: endpoint.head, at: endpoint.headAt });
     }
-    return best;
+    const maxAhead = this.#options.maxAhead ?? DEFAULT_MAX_AHEAD;
+    const liars = new Set<EndpointState>();
+    for (const sample of fresh) {
+      const anchor = peerMedian(sample, fresh);
+      if (anchor !== null && sample.head > anchor + maxAhead) liars.add(sample.endpoint);
+    }
+    if (fresh.length === 2 && liars.size > 0) return { best: null, liars: new Set() };
+    let best: number | null = null;
+    for (const sample of fresh) {
+      if (liars.has(sample.endpoint)) continue;
+      if (best === null || sample.head > best) best = sample.head;
+    }
+    return { best, liars };
   }
 
   #better(left: EndpointState, right: EndpointState, method: string): EndpointState {
@@ -231,6 +297,28 @@ export class Scoreboard {
   }
 }
 
+interface HeadSample {
+  readonly endpoint: EndpointState;
+  readonly head: number;
+  readonly at: number;
+}
+
+interface HeadView {
+  /** Highest believed fresh head, or null when none is believed. */
+  readonly best: number | null;
+  /** Endpoints whose fresh head is ignored as implausible. */
+  readonly liars: ReadonlySet<EndpointState>;
+}
+
+/** Median of the other fresh heads, each carried forward to when `sample` was taken. Upper middle on an even count. */
+function peerMedian(sample: HeadSample, fresh: readonly HeadSample[]): number | null {
+  const others = fresh
+    .filter((other) => other !== sample)
+    .map((other) => other.head + (Math.max(0, sample.at - other.at) / 1_000) * MAX_BLOCKS_PER_SECOND)
+    .sort((left, right) => left - right);
+  return others[Math.floor(others.length / 2)] ?? null;
+}
+
 function copyStat(stat: MethodStat): { ewma: number; tail: number; error: number; n: number } {
   return { ewma: stat.ewma, tail: stat.tail, error: stat.error, n: stat.n };
 }
@@ -250,10 +338,15 @@ export function parseQuantity(value: unknown): number | null {
   return parsed;
 }
 
-/** Pull a block number out of a JSON-RPC result when the method carries one. */
-export function blockNumberFromResult(method: string, result: unknown): number | null {
+/**
+ * Pull the chain head out of a JSON-RPC result when the call asked for it.
+ * Only `eth_blockNumber`, and `eth_getBlockByNumber` with the `"latest"` tag, count.
+ * A block fetched by hash or by number is history, not the head.
+ */
+export function blockNumberFromResult(method: string, result: unknown, params?: unknown): number | null {
   if (method === "eth_blockNumber") return parseQuantity(result);
-  if (method !== "eth_getBlockByNumber" && method !== "eth_getBlockByHash") return null;
+  if (method !== "eth_getBlockByNumber") return null;
+  if (!Array.isArray(params) || params[0] !== "latest") return null;
   if (typeof result !== "object" || result === null || !("number" in result)) return null;
   return parseQuantity(result.number);
 }

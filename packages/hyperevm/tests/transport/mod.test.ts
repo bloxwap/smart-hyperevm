@@ -39,6 +39,8 @@ function open(options: HyperevmTransportOptions) {
     routing: "best",
     retryCount: 2,
     hedge: false,
+    // These mocks answer every method alike. Chain checks have their own tests.
+    verifyChainId: false,
     ...options,
   })({ timeout: options.timeout ?? 1_000 });
 }
@@ -81,9 +83,7 @@ describe("hyperevm transport", () => {
     });
     const second = mockEndpoint("second", () => "0xhash");
     const client = open({ endpoints: [first.transport, second.transport] });
-    await expect(client.request({ method: "eth_sendRawTransaction", params: ["0xabc"] })).rejects.toThrow(
-      /timeout talking/,
-    );
+    await expect(client.request({ method: "eth_sendTransaction", params: [{}] })).rejects.toThrow(/timeout talking/);
     expect(first.calls).toHaveLength(1);
     expect(second.calls).toHaveLength(0);
   });
@@ -308,5 +308,155 @@ describe("hyperevm transport", () => {
     await client.request({ method: "eth_chainId" });
     expect(events).toContain("failover");
     expect(events).toContain("success");
+  });
+});
+
+describe("head trust through viem http", () => {
+  type Answer = (method: string, params: unknown) => unknown;
+
+  function rpc(answers: Record<string, Answer>) {
+    const calls: { host: string; method: string; params: unknown }[] = [];
+    const fetchFn = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const host = new URL(input instanceof Request ? input.url : String(input)).hostname;
+      const body = JSON.parse(String(init?.body)) as { id: number; method: string; params?: unknown };
+      calls.push({ host, method: body.method, params: body.params });
+      const answer = answers[host];
+      if (!answer) throw new Error(`unexpected host ${host}`);
+      const result = body.method === "eth_chainId" ? "0x3e7" : answer(body.method, body.params);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    return { calls, fetchFn };
+  }
+
+  function block(number: string): Record<string, unknown> {
+    const zero = (bytes: number): string => `0x${"00".repeat(bytes)}`;
+    return {
+      number,
+      hash: `0x${"ab".repeat(32)}`,
+      parentHash: zero(32),
+      timestamp: "0x1",
+      gasLimit: "0x1c9c380",
+      gasUsed: "0x0",
+      baseFeePerGas: "0x1",
+      difficulty: "0x0",
+      extraData: "0x",
+      logsBloom: zero(256),
+      miner: zero(20),
+      mixHash: zero(32),
+      nonce: "0x0000000000000000",
+      receiptsRoot: zero(32),
+      sha3Uncles: zero(32),
+      size: "0x1",
+      stateRoot: zero(32),
+      transactionsRoot: zero(32),
+      transactions: [],
+      uncles: [],
+    };
+  }
+
+  const honest =
+    (head: { value: number }): Answer =>
+    (method, params) => {
+      const latest = `0x${head.value.toString(16)}`;
+      if (method === "eth_blockNumber") return latest;
+      if (method === "eth_getBlockByNumber") {
+        const tag = Array.isArray(params) ? params[0] : undefined;
+        return block(tag === "latest" ? latest : String(tag));
+      }
+      if (method === "eth_getBlockByHash") return block("0x10");
+      return "0x";
+    };
+
+  const liar: Answer = (method) => (method === "eth_blockNumber" ? "0xffffffff" : "0x");
+
+  function lcg(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state = (state * 9301 + 49297) % 233280;
+      return state / 233280;
+    };
+  }
+
+  function reader(fetchFn: HyperevmTransportOptions["fetchFn"], routing: "best" | "p2c") {
+    return createPublicClient({
+      chain: hyperEvm,
+      transport: hyperevm({
+        endpoints: ["https://a.example.test/evm", "https://b.example.test/evm", "https://c.example.test/evm"],
+        fetchFn,
+        routing,
+        random: lcg(7),
+        hedge: false,
+        headLag: { probeInterval: false },
+      }),
+    });
+  }
+
+  const ethCall = { method: "eth_call", params: [{ to: `0x${"00".repeat(19)}01`, data: "0x" }, "latest"] } as const;
+
+  test("an endpoint reporting 0xffffffff gets no traffic under best", async () => {
+    const head = { value: 1_000 };
+    const mock = rpc({ "a.example.test": honest(head), "b.example.test": honest(head), "c.example.test": liar });
+    const client = reader(mock.fetchFn, "best");
+    await client.transport.probe();
+    mock.calls.length = 0;
+    for (let index = 0; index < 200; index += 1) await client.request(ethCall);
+    expect(mock.calls.filter((call) => call.host === "c.example.test")).toHaveLength(0);
+    expect(client.transport.snapshot().map((item) => item.lag)).toEqual([0, 0, null]);
+  });
+
+  test("an endpoint reporting 0xffffffff gets at most its fair share under p2c", async () => {
+    const head = { value: 1_000 };
+    const mock = rpc({ "a.example.test": honest(head), "b.example.test": honest(head), "c.example.test": liar });
+    const client = reader(mock.fetchFn, "p2c");
+    await client.transport.probe();
+    mock.calls.length = 0;
+    for (let index = 0; index < 200; index += 1) await client.request(ethCall);
+    expect(mock.calls.filter((call) => call.host === "c.example.test").length).toBeLessThan(20);
+  });
+
+  test("a historical block does not move a healthy endpoint's head", async () => {
+    const head = { value: 0x1000 };
+    const mock = rpc({
+      "a.example.test": honest(head),
+      "b.example.test": honest(head),
+      "c.example.test": honest(head),
+    });
+    const client = reader(mock.fetchFn, "best");
+    await client.transport.probe();
+    await client.getBlock({ blockNumber: 16n });
+    await client.getBlock({ blockHash: `0x${"ab".repeat(32)}` });
+    expect(mock.calls.filter((call) => call.method.startsWith("eth_getBlockBy"))).toHaveLength(2);
+    expect(client.transport.snapshot().map((item) => [item.head, item.lag])).toEqual([
+      [0x1000, 0],
+      [0x1000, 0],
+      [0x1000, 0],
+    ]);
+  });
+
+  test("a legitimately advancing chain still updates heads", async () => {
+    const head = { value: 0x1000 };
+    const slow = { value: 0x1000 };
+    const mock = rpc({
+      "a.example.test": honest(head),
+      "b.example.test": honest(head),
+      "c.example.test": honest(slow),
+    });
+    const client = reader(mock.fetchFn, "best");
+    await client.transport.probe();
+    head.value = 0x1008;
+    await client.transport.probe();
+    expect(client.transport.snapshot().map((item) => [item.head, item.lag])).toEqual([
+      [0x1008, 0],
+      [0x1008, 0],
+      [0x1000, 8],
+    ]);
+    head.value = 0x1009;
+    expect((await client.getBlock()).number).toBe(0x1009n);
+    const rows = client.transport.snapshot();
+    expect(Math.max(...rows.map((item) => item.head ?? 0))).toBe(0x1009);
+    expect(rows[2]?.lag).toBe(9);
   });
 });

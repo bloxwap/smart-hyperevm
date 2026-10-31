@@ -81,7 +81,35 @@ const transport = hyperevm({
 });
 ```
 
-URL strings are wrapped in viem's `http()`, or `webSocket()` when the URL is `wss://`. A transport you pass in keeps the batching it was created with. Idempotent reads fail over on timeout, rate limit, and connection loss. `eth_sendRawTransaction` and the other non-idempotent methods go to one endpoint.
+URL strings are wrapped in viem's `http()`, or `webSocket()` when the URL is `wss://`. A transport you pass in keeps the batching it was created with. Pass provider URLs as strings or `{ url, label }` rather than `http(url)`: viem drops the headers of a 429 or 503 whose body is a JSON-RPC error, so only a transport built from a URL keeps its `Retry-After`. Idempotent reads fail over on timeout, rate limit, and connection loss. Once every endpoint has failed a call, the transport backs off and tries again while `retryCount` allows. An endpoint that keeps failing is ejected for a cooldown.
+
+`eth_sendRawTransaction` and `eth_sendRawTransactionSync` fail over on endpoint errors, because the same signed bytes have the same hash and the nonce stops a second execution. They are never hedged. The other non-idempotent methods go to one endpoint.
+
+Before an endpoint serves its first call, the transport checks `eth_chainId` against the client chain (999 when there is none). An endpoint on another chain is quarantined and gets no calls.
+
+### Production
+
+Pass explicit endpoints you trust. The shipped registry currently rests on a single probe run, so every row in it is on the new-node cap. It is a reasonable default for scripts, not for a service.
+
+```ts
+import { hyperevm } from "@bloxwap/hyperevm";
+
+const transport = hyperevm({
+  endpoints: [
+    { url: env.HYPERPC_URL, label: "hyperpc" }, // https://...?apikey=...
+    { url: env.DRPC_URL, label: "drpc" }, // key in the path
+    "https://rpc.hyperliquid.xyz/evm",
+  ],
+  timeout: 3_500,
+  hedge: true,
+});
+```
+
+- **Keys in URLs work at runtime.** An explicit endpoint may carry a key in its query, its path, or `user:pass@`. Events, `snapshot()`, `value.endpoints`, and thrown errors only show the `label`, or `scheme://host[:port]` when there is none. Do not commit those URLs. The registry still rejects them.
+- **Build the transport once.** One `hyperevm()` factory shares a single instance (scores, breaker, probe timer) across every client built with the same timeout, retry count, and chain. Building it does no I/O and starts no timer. The head probe timer starts on the first request and stops after 60 seconds without one (`headLag.probeIdleTimeout`).
+- **Cloudflare Workers.** Create the transport in module scope so each isolate builds it once, and create clients per request. Set `headLag: { probeInterval: false }` so nothing runs outside a request. Heads then come only from the `eth_blockNumber` and `latest` block reads your own calls make.
+- **UI reads.** A per-attempt `timeout` of 3 to 4 seconds with `hedge: true` keeps a stalled node from holding a page. `options.timeout` wins over the client's `timeout`.
+- **Shutdown.** `transport.value.close()` stops the probe timer. Later requests on every client sharing that instance reject with `TransportClosedError`. The next client built from the factory gets a fresh instance.
 
 ### Observe
 
@@ -95,7 +123,7 @@ const transport = hyperevm({
 });
 ```
 
-`onEvent` is telemetry. A throw inside the listener does not fail the request. `transport.value.snapshot()` returns the current scores, heads, and in-flight counts. The score, the registry window, and the anti-gaming rules are in [docs/ranking.md](docs/ranking.md).
+`onEvent` is telemetry. A throw inside the listener does not fail the request. Besides requests, successes, errors, failovers, and hedges, it reports `head` (with `trusted: false` when the head is ignored), `quarantine`, `eject`, and `restore`. `transport.value.snapshot(method)` returns the current scores for `method` (default `eth_call`), heads, lag, quarantine, and in-flight counts. The score, the registry window, and the anti-gaming rules are in [docs/ranking.md](docs/ranking.md).
 
 ## Documentation
 
@@ -127,6 +155,8 @@ Type-checking uses `tsc --noEmit`. `bun run rank` probes the public lists and re
 ## Security
 
 **Registry rows and examples are public URLs.** Do not commit an RPC URL that contains an API key, username, or password. The ranker rejects credentials and query strings. Load a private endpoint from the environment. Bun reads a local `.env`, and this repository gitignores it.
+
+At runtime, `hyperevm()` accepts key-bearing URLs and exposes only a public label. Errors from those endpoints have every spelling of the URL replaced by the label, at any depth, response headers included. A provider that echoes the bare key on its own in an error body is not scrubbed.
 
 This package routes JSON-RPC. It does not sign transactions or hold a wallet.
 

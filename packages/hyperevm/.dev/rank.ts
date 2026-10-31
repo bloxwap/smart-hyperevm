@@ -3,7 +3,10 @@
  *
  * Refuses to write when a source list fails to download, or when a previously
  * healthy registry would be replaced by a run where every probe missed chain
- * id 999. That keeps one bad network day from emptying the default pool.
+ * id 999 or by a ranking with no eligible endpoint. That keeps one bad network
+ * day from emptying the default pool.
+ * The table marks endpoints whose latest HyperCore read precompile probe
+ * failed (`NO-CORE`); those are listed but kept out of the default pool.
  *
  * Usage: `bun run rank` or `bun run .dev/rank.ts --dry-run`
  * @module
@@ -15,6 +18,7 @@ import {
   defaultRankPolicy,
   mergeEndpointInputs,
   rankRegistry,
+  refuseRegistryRewrite,
   type ProbeObservation,
 } from "../src/registry/_policy.ts";
 import { assertRegistryFile, type RegistryFile } from "../src/registry/_registry.ts";
@@ -53,6 +57,9 @@ async function main(): Promise<void> {
   });
   const observations = [...retained, ...withLag];
   const ranked = rankRegistry(merged, observations, now.getTime(), previous.policy);
+  // Probe vetoes such as a failed HyperCore read can empty the pool even when chain checks passed.
+  const refusal = refuseRegistryRewrite(previous.endpoints, ranked);
+  if (refusal) throw new Error(refusal);
   const next: RegistryFile = {
     version: 1,
     chainId: 999,
@@ -77,8 +84,10 @@ function printTable(registry: RegistryFile): void {
     const latency = endpoint.stats?.latencyMs ?? "-";
     const uptime = endpoint.stats ? `${Math.round(endpoint.stats.uptime * 100)}%` : "-";
     const rank = endpoint.rank ?? "-";
+    const precompile =
+      endpoint.stats?.precompileOk === true ? "core" : endpoint.stats?.precompileOk === false ? "NO-CORE" : "-";
     console.log(
-      `${String(rank).padStart(3)}  w=${endpoint.weight.toFixed(3)}  ${uptime.padStart(4)}  ${String(latency).padStart(8)}ms  ${endpoint.kind.padEnd(9)}  ${endpoint.url}`,
+      `${String(rank).padStart(3)}  w=${endpoint.weight.toFixed(3)}  ${uptime.padStart(4)}  ${String(latency).padStart(8)}ms  ${precompile.padEnd(7)}  ${endpoint.kind.padEnd(9)}  ${endpoint.url}`,
     );
   }
 }

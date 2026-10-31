@@ -109,6 +109,10 @@ function expectStats(value: unknown, label: string): RegistryEndpoint["stats"] {
   if (latency !== null && typeof latency !== "number") throw new Error(`Registry ${label}.stats.latencyMs is invalid.`);
   if (tail !== null && typeof tail !== "number") throw new Error(`Registry ${label}.stats.tailMs is invalid.`);
   if (lag !== null && typeof lag !== "number") throw new Error(`Registry ${label}.stats.medianLag is invalid.`);
+  const precompile = value.precompileOk;
+  if (precompile !== undefined && precompile !== null && typeof precompile !== "boolean") {
+    throw new Error(`Registry ${label}.stats.precompileOk is invalid.`);
+  }
   return {
     observations: expectNumber(value.observations, `${label}.stats.observations`),
     successes: expectNumber(value.successes, `${label}.stats.successes`),
@@ -117,6 +121,7 @@ function expectStats(value: unknown, label: string): RegistryEndpoint["stats"] {
     tailMs: tail === null ? null : tail,
     medianLag: lag === null ? null : lag,
     established: value.established === true,
+    ...(precompile === undefined ? {} : { precompileOk: precompile }),
   };
 }
 

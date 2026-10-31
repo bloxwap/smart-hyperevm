@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { isIdempotentMethod, shouldFailover } from "../../src/transport/_methods.ts";
+import {
+  isAlreadyKnownError,
+  isIdempotentMethod,
+  isRebroadcastMethod,
+  shouldFailover,
+} from "../../src/transport/_methods.ts";
 
 describe("method safety", () => {
   test("transaction sends and subscriptions are not idempotent", () => {
@@ -10,6 +15,11 @@ describe("method safety", () => {
     expect(isIdempotentMethod("eth_sendRawTransaction")).toBe(false);
     expect(isIdempotentMethod("eth_sendTransaction")).toBe(false);
     expect(isIdempotentMethod("eth_subscribe")).toBe(false);
+    expect(isIdempotentMethod("eth_getFilterChanges")).toBe(false);
+    expect(isIdempotentMethod("eth_newFilter")).toBe(false);
+    expect(isIdempotentMethod("eth_newBlockFilter")).toBe(false);
+    expect(isIdempotentMethod("eth_newPendingTransactionFilter")).toBe(false);
+    expect(isIdempotentMethod("eth_getFilterLogs")).toBe(true);
     expect(isIdempotentMethod("eth_call", ["eth_call"])).toBe(false);
   });
 
@@ -26,5 +36,50 @@ describe("method safety", () => {
     const timeout = new Error("timed out");
     timeout.name = "TimeoutError";
     expect(shouldFailover(timeout)).toBe(true);
+  });
+
+  test("provider limits coded -32602 fail over, genuine invalid params do not", () => {
+    const limits = [
+      "query exceeds max block range 1000",
+      "block range is too wide",
+      "Block range limit exceeded.",
+      "exceed maximum block range: 50",
+      "ranges over 10000 blocks are not supported on freetier",
+      "query returned more than 10000 results",
+      "too many logs in response",
+      "Log response size exceeded.",
+      "eth_getLogs is limited to a 10,000 range",
+      "query timeout exceeded",
+    ];
+    for (const message of limits)
+      expect(shouldFailover(Object.assign(new Error(message), { code: -32602 }))).toBe(true);
+    const invalid = [
+      "invalid argument 0: hex string without 0x prefix",
+      "missing value for required argument 0",
+      "invalid block range params",
+    ];
+    for (const message of invalid)
+      expect(shouldFailover(Object.assign(new Error(message), { code: -32602 }))).toBe(false);
+    // A revert stays terminal even when its reason mentions a limit.
+    expect(shouldFailover(Object.assign(new Error("execution reverted: limit exceeded"), { code: -32602 }))).toBe(
+      false,
+    );
+  });
+
+  test("node verdicts on a transaction are terminal", () => {
+    for (const message of ["nonce too low", "insufficient funds for gas * price + value", "already known"]) {
+      expect(shouldFailover(Object.assign(new Error(message), { code: -32000 }))).toBe(false);
+    }
+    expect(isAlreadyKnownError(new Error("already known"))).toBe(true);
+    expect(isAlreadyKnownError(new Error("known transaction: 0xabc"))).toBe(true);
+    expect(isAlreadyKnownError(new Error("unknown transaction type"))).toBe(false);
+    expect(shouldFailover(new Error("unknown transaction type"))).toBe(true);
+  });
+
+  test("only signed raw sends may be rebroadcast", () => {
+    expect(isRebroadcastMethod("eth_sendRawTransaction")).toBe(true);
+    expect(isRebroadcastMethod("eth_sendRawTransactionSync")).toBe(true);
+    expect(isRebroadcastMethod("eth_sendTransaction")).toBe(false);
+    expect(isRebroadcastMethod("eth_subscribe")).toBe(false);
   });
 });
