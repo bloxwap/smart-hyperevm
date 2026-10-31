@@ -44,6 +44,7 @@ import {
   shouldFailover,
   toError,
 } from "./_methods.ts";
+import { type RaceOptions, pickRacers, raceCalls, resolveRace } from "./_race.ts";
 import { type ScoreConfig, defaultScoreConfig } from "./_score.ts";
 import {
   DEFAULT_MAX_AHEAD,
@@ -61,6 +62,7 @@ export {
   isRebroadcastMethod,
   shouldFailover,
 } from "./_methods.ts";
+export type { RaceOptions } from "./_race.ts";
 export { blockNumberFromResult, parseQuantity } from "./_scoreboard.ts";
 export { defaultScoreConfig, endpointScore, inflation, type MethodStat, type ScoreConfig } from "./_score.ts";
 
@@ -198,6 +200,12 @@ export interface HyperevmTransportOptions {
   headLag?: boolean | HeadLagOptions | undefined;
   /** Send a second idempotent read when the first is slower than usual. Default: off. */
   hedge?: boolean | HedgeOptions | undefined;
+  /**
+   * Send each idempotent read to the best-scored verified endpoints at once. The first answer wins, and losers
+   * finish so their latency is still scored. `true` races 2. Only the first attempt races. A hedge adds to the race.
+   * Default: off, since every raced read costs `width` upstream requests.
+   */
+  race?: boolean | RaceOptions | undefined;
   /** `"best"` always uses the lowest score. `"p2c"` draws two endpoints and keeps the better one. Default: `"p2c"`. */
   routing?: "best" | "p2c" | undefined;
   /** Extra methods that must not be retried or hedged. */
@@ -408,6 +416,7 @@ function sharedKey(timeout: number, retryCount: number, chain: Chain | undefined
 export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyperevm", HyperevmTransportValue> {
   const headLag = resolveHeadLag(options.headLag);
   const hedge = resolveHedge(options.hedge);
+  const raceRivals = resolveRace(options.race);
   const routing = options.routing ?? "p2c";
   const perMethod = options.perMethod ?? true;
   const now = options.now ?? ((): number => Date.now());
@@ -716,6 +725,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       const exclude = new Set<string>();
       const errors: Error[] = [];
       const retries = idempotent || rebroadcast;
+      // A race takes the best endpoints in score order, so its lead is never a p2c draw.
+      const racing = idempotent && raceRivals > 0;
       const attempts = retries ? retryCount + 1 : 1;
       // The availability exception: when every candidate is ejected before the first attempt, that attempt may
       // still use one. Nothing else is ever dispatched to an endpoint ejected at dispatch time.
@@ -726,7 +737,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       let ejectionWaitMs = 0;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         let wait = attempt > 0 ? retryDelay : 0;
-        let mode = attempt === 0 ? routing : "best";
+        let mode = attempt === 0 && !racing ? routing : "best";
         let allowEjected = attempt === 0 && lastResort;
         let newRound = false;
         let endpoint: RankedEndpoint | undefined;
@@ -775,7 +786,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
         if (previous && previous.id !== endpoint.id)
           emit({ type: "failover", from: previous.url, to: endpoint.url, method });
         try {
-          return await dispatch(endpoint, method, params, parent, idempotent, exclude);
+          return await dispatch(endpoint, method, params, parent, idempotent, exclude, errors, attempt === 0 && racing);
         } catch (error: unknown) {
           const wrapped = toError(error);
           errors.push(wrapped);
@@ -803,8 +814,22 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
       parent: AbortSignal | undefined,
       idempotent: boolean,
       exclude: Set<string>,
+      errors: Error[],
+      race: boolean,
     ): Promise<unknown> => {
-      const primary = start(endpoint, method, params, parent, false, true);
+      const rivals = race ? pickRivals(method, exclude) : [];
+      if (rivals.length > 0)
+        emit({ type: "race", endpoints: [endpoint.url, ...rivals.map((rival) => rival.url)], method });
+      const lead = start(endpoint, method, params, parent, false, true);
+      // Rivals join `exclude`, so a race that fails moves on to the endpoints it did not try.
+      const primary =
+        rivals.length === 0
+          ? lead
+          : raceCalls(
+              [lead, ...rivals.map((rival) => start(rival, method, params, parent, false, true))],
+              (error) => !shouldFailover(error) || options.shouldThrow?.(error) === true,
+              (lost) => errors.push(...lost),
+            );
       if (!hedge.enabled || !idempotent) return primary.promise;
       const wait = board.hedgeDelay(endpoint.id, method, hedge.minDelay, hedge.multiplier);
       return raceHedge(primary, wait, (active) => {
@@ -824,6 +849,26 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
           () => undefined,
         );
       });
+    };
+
+    /**
+     * Endpoints to race beside the lead, synchronously and against the breaker as it is at dispatch.
+     * Only verified, unquarantined, closed endpoints race. An unverified one is checked in the background instead.
+     */
+    const pickRivals = (method: string, exclude: Set<string>): RankedEndpoint[] => {
+      const rivals = pickRacers(raceRivals, exclude, {
+        next: (skip: ReadonlySet<string>): RankedEndpoint | undefined => board.pick(method, skip, "best", random),
+        state: (endpoint: RankedEndpoint): "ready" | "unverified" | "unavailable" => {
+          if (breaker.isOpen(endpoint.id)) return "unavailable";
+          return gates.get(endpoint.id)?.verified === false ? "unverified" : "ready";
+        },
+        verify: (endpoint: RankedEndpoint): void => {
+          const target = byId.get(endpoint.id);
+          if (target) void checkChain(target);
+        },
+      });
+      for (const rival of rivals) exclude.add(rival.id);
+      return rivals;
     };
 
     let closed = false;

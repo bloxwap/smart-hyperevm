@@ -89,7 +89,7 @@ const transport = hyperevm({
 // createPublicClient({ chain: hyperEvm, transport })
 ```
 
-Hedging is off unless you set `hedge`. When it is on, a slow idempotent read is copied to the next endpoint and the first success wins. Sends are never hedged. Signed raw transactions fail over on endpoint errors. Other sends go to one endpoint.
+Hedging is off unless you set `hedge`. When it is on, a slow idempotent read is copied to the next endpoint and the first success wins. Racing is off unless you set `race`. `race: true` sends each idempotent read to the two best-scored endpoints at once, `race: { width }` to more, and the first answer wins. Sends are never hedged or raced. Signed raw transactions fail over on endpoint errors. Other sends go to one endpoint.
 
 ### Production
 

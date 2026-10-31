@@ -123,7 +123,7 @@ const transport = hyperevm({
 });
 ```
 
-`onEvent` is telemetry. A throw inside the listener does not fail the request. Besides requests, successes, errors, failovers, and hedges, it reports `head` (with `trusted: false` when the head is ignored), `quarantine`, `eject`, and `restore`. `transport.value.snapshot(method)` returns the current scores for `method` (default `eth_call`), heads, lag, quarantine, and in-flight counts. The score, the registry window, and the anti-gaming rules are in [docs/ranking.md](docs/ranking.md).
+`onEvent` is telemetry. A throw inside the listener does not fail the request. Besides requests, successes, errors, failovers, hedges, and races, it reports `head` (with `trusted: false` when the head is ignored), `quarantine`, `eject`, and `restore`. `transport.value.snapshot(method)` returns the current scores for `method` (default `eth_call`), heads, lag, quarantine, and in-flight counts. The score, the registry window, and the anti-gaming rules are in [docs/ranking.md](docs/ranking.md).
 
 ## Documentation
 
