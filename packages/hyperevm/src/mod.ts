@@ -70,6 +70,7 @@ export {
   type HyperevmTransportOptions,
   type HyperevmTransportValue,
   type MethodStat,
+  type PinLatestOptions,
   type RaceOptions,
   type ScoreConfig,
 } from "./transport/mod.ts";
