@@ -1,5 +1,5 @@
 /**
- * Offline comparison of `hyperevm()` and viem `fallback`.
+ * Offline comparison of `smartHyperevm()` and viem `fallback`.
  *
  * Clocks move only when a mock endpoint handles a call, so the suite does not
  * sleep through the virtual scenarios. Each user call is preceded by
@@ -10,7 +10,7 @@
 
 import { createTransport, fallback, type EIP1193Parameters, type EIP1193RequestFn, type Transport } from "viem";
 
-import { hyperevm, type HyperevmEvent, type ScoreConfig } from "../../src/mod.ts";
+import { smartHyperevm, type HyperevmEvent, type ScoreConfig } from "../../src/mod.ts";
 
 const TIP = 1_000;
 const MAX_LAG = 2;
@@ -285,7 +285,7 @@ async function runHyperevm(
   const clock: Clock = { value: 0 };
   const transports = specs.map((spec) => scripted(clock, spec));
   const lags = new Map(specs.map((spec, index) => [`transport:${index}`, spec.lag]));
-  const client = hyperevm({
+  const client = smartHyperevm({
     endpoints: transports,
     headLag: { probeInterval: false, maxLag: MAX_LAG },
     hedge: false,
@@ -303,7 +303,7 @@ async function runHyperevm(
     verifyChainId: false,
   })({ timeout: 10_000 });
   const value = client.value;
-  if (!value) throw new Error("hyperevm transport is missing its value");
+  if (!value) throw new Error("smartHyperevm transport is missing its value");
   const attempts = new Map<string, number>();
   const samples: Sample[] = [];
   for (const call of workload()) {
@@ -391,7 +391,7 @@ async function hedgePass(enabled: boolean): Promise<HedgeSeries> {
         return "0x1";
       }) as EIP1193RequestFn,
     });
-  const client = hyperevm({
+  const client = smartHyperevm({
     endpoints: [primary, secondary],
     headLag: false,
     routing: "best",
@@ -415,7 +415,7 @@ async function hedgePass(enabled: boolean): Promise<HedgeSeries> {
     samples.push(Date.now() - started);
   }
   return {
-    label: enabled ? "hyperevm hedge on" : "hyperevm hedge off",
+    label: enabled ? "smartHyperevm hedge on" : "smartHyperevm hedge off",
     requests: 20,
     errors,
     median: quantile(samples, 50),
@@ -431,16 +431,16 @@ export async function runSimulation(): Promise<SimulationReport> {
   const stale = staleHeadSpecs();
   const deadFirst = [
     await runFallback("fallback", dead, false),
-    await runHyperevm("hyperevm p2c", dead, "p2c"),
-    await runHyperevm("hyperevm best", dead, "best"),
+    await runHyperevm("smartHyperevm p2c", dead, "p2c"),
+    await runHyperevm("smartHyperevm best", dead, "best"),
   ];
   const staleHead = [
     await runFallback("fallback", stale, false),
     await runFallback("fallback after one ping sort", stale, true),
-    await runHyperevm("hyperevm p2c", stale, "p2c"),
-    await runHyperevm("hyperevm best", stale, "best"),
-    await runHyperevm("hyperevm p2c lagWeight 2", stale, "p2c", { lagWeight: 2 }),
-    await runHyperevm("hyperevm p2c latencyMix 0.4", stale, "p2c", { latencyMix: 0.4 }),
+    await runHyperevm("smartHyperevm p2c", stale, "p2c"),
+    await runHyperevm("smartHyperevm best", stale, "best"),
+    await runHyperevm("smartHyperevm p2c lagWeight 2", stale, "p2c", { lagWeight: 2 }),
+    await runHyperevm("smartHyperevm p2c latencyMix 0.4", stale, "p2c", { latencyMix: 0.4 }),
   ];
   const hedge = {
     off: await hedgePass(false),

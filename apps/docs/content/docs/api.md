@@ -11,7 +11,7 @@ description: Inspect HyperEVM transport telemetry, errors, cache statistics, and
 Pass `onEvent` when creating the transport:
 
 ```ts
-const transport = hyperevm({
+const transport = smartHyperevm({
   onEvent(event) {
     if (event.type === "failover") {
       console.log(event.from, "->", event.to);
@@ -51,7 +51,7 @@ Execution reverts, invalid parameters, transaction rejections, user rejections, 
 Sends, signing methods, subscriptions, and filter operations are never raced or hedged. Signed raw transactions fail over on endpoint errors because rebroadcasting the same bytes cannot create a second execution.
 
 ```ts
-const transport = hyperevm({
+const transport = smartHyperevm({
   rebroadcastRawTransactions: false,
 });
 ```

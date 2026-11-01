@@ -21,17 +21,17 @@ npm, pnpm, and Yarn work too. Node.js 22.12 or later is required. `viem` is the 
 ```ts
 import { createPublicClient } from "viem";
 import { hyperEvm } from "viem/chains";
-import { hyperevm } from "@bloxwap/smart-hyperevm";
+import { smartHyperevm } from "@bloxwap/smart-hyperevm";
 
 const client = createPublicClient({
   chain: hyperEvm,
-  transport: hyperevm(),
+  transport: smartHyperevm(),
 });
 
 const block = await client.getBlockNumber();
 ```
 
-With no arguments, `hyperevm()` uses the eligible HTTP endpoints in the shipped registry. HyperEVM mainnet is chain ID 999.
+With no arguments, `smartHyperevm()` uses the eligible HTTP endpoints in the shipped registry. HyperEVM mainnet is chain ID 999.
 
 ## Defaults
 

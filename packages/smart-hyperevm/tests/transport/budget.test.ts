@@ -3,7 +3,7 @@ import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Tr
 
 import { BudgetExhaustedError } from "../../src/_errors.ts";
 import { Budgets, defaultBurst, resolveDefaultBudget, resolveEndpointBudget } from "../../src/transport/_budget.ts";
-import { hyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { smartHyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 interface MockEndpoint {
@@ -31,7 +31,7 @@ function mockEndpoint(handler: (method: string, seen: number) => unknown | Promi
 const answers = (method: string): unknown => (method === "eth_chainId" ? "0x3e7" : "0x1");
 
 function open(options: HyperevmTransportOptions, timeout = 1_000) {
-  return hyperevm({
+  return smartHyperevm({
     ...BASELINE,
     headLag: false,
     routing: "best",
@@ -240,7 +240,7 @@ describe("routing under budgets", () => {
 
   test("instances one factory builds spend the same buckets", async () => {
     const a = mockEndpoint(answers);
-    const factory = hyperevm({
+    const factory = smartHyperevm({
       ...BASELINE,
       endpoints: [{ transport: a.transport, rps: 0.1, burst: 2 }],
       headLag: false,
@@ -301,7 +301,7 @@ describe("every upstream request spends a token", () => {
   test("head probes spend a token and skip spent endpoints instead of waiting", async () => {
     const a = mockEndpoint(answers);
     const b = mockEndpoint(answers);
-    const client = hyperevm({
+    const client = smartHyperevm({
       ...BASELINE,
       endpoints: [
         { transport: a.transport, label: "a", rps: 0.1, burst: 1 },
@@ -324,7 +324,7 @@ describe("every upstream request spends a token", () => {
 
   test("a probe whose chain check took the last token does not send eth_blockNumber", async () => {
     const a = mockEndpoint(answers);
-    const client = hyperevm({
+    const client = smartHyperevm({
       ...BASELINE,
       endpoints: [{ transport: a.transport, rps: 0.1, burst: 1 }],
       headLag: { probeInterval: false },

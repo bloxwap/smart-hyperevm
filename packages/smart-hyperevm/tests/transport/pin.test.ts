@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Transport } from "viem";
 
 import { pinParams, resolvePin } from "../../src/transport/_pin.ts";
-import { type HyperevmEvent, type HyperevmTransportOptions, hyperevm } from "../../src/transport/mod.ts";
+import { type HyperevmEvent, type HyperevmTransportOptions, smartHyperevm } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 interface Call {
@@ -54,7 +54,7 @@ function hex(block: number): string {
 }
 
 function open(options: HyperevmTransportOptions) {
-  const client = hyperevm({
+  const client = smartHyperevm({
     ...BASELINE,
     routing: "best",
     retryCount: 2,
@@ -65,7 +65,7 @@ function open(options: HyperevmTransportOptions) {
     ...options,
   })({ timeout: options.timeout ?? 1_000 });
   const { value } = client;
-  if (!value) throw new Error("hyperevm() returned no transport value.");
+  if (!value) throw new Error("smartHyperevm() returned no transport value.");
   return { request: client.request, value };
 }
 

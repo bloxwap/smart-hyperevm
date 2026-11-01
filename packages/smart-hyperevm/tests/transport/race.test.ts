@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Transport } from "viem";
 
 import { AllEndpointsFailedError } from "../../src/_errors.ts";
-import { type HyperevmEvent, type HyperevmTransportOptions, hyperevm } from "../../src/transport/mod.ts";
+import { type HyperevmEvent, type HyperevmTransportOptions, smartHyperevm } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 interface MockEndpoint {
@@ -27,7 +27,7 @@ function mockEndpoint(name: string, handler: (method: string) => unknown | Promi
 }
 
 function open(options: HyperevmTransportOptions) {
-  return hyperevm({
+  return smartHyperevm({
     ...BASELINE,
     headLag: false,
     routing: "best",
@@ -125,7 +125,7 @@ describe("race option", () => {
   });
 
   test.each([1, 0, 2.5, Number.NaN])("width %p throws", (width) => {
-    expect(() => hyperevm({ ...BASELINE, race: { width } })).toThrow(/race\.width/);
+    expect(() => smartHyperevm({ ...BASELINE, race: { width } })).toThrow(/race\.width/);
   });
 });
 

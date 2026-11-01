@@ -40,7 +40,7 @@ export function resolveRace(value: boolean | RaceOptions | undefined): number {
   if (value === false) return 0;
   const width = typeof value === "object" ? (value.width ?? DEFAULT_RACE_WIDTH) : DEFAULT_RACE_WIDTH;
   if (!Number.isInteger(width) || width < 2) {
-    throw new Error(`hyperevm() race.width must be an integer of at least 2, got ${width}.`);
+    throw new Error(`smartHyperevm() race.width must be an integer of at least 2, got ${width}.`);
   }
   return width - 1;
 }

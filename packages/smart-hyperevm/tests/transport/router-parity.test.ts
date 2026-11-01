@@ -10,7 +10,7 @@ import {
   type HyperevmTransportOptions,
   type HyperevmTransportValue,
   type ScoreSnapshot,
-  hyperevm,
+  smartHyperevm,
 } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
@@ -61,7 +61,7 @@ interface Opened {
 }
 
 function open(options: HyperevmTransportOptions): Opened {
-  const transport = hyperevm({
+  const transport = smartHyperevm({
     ...BASELINE,
     routing: "best",
     retryCount: 2,
@@ -72,7 +72,7 @@ function open(options: HyperevmTransportOptions): Opened {
     now: () => START,
     ...options,
   })({ timeout: options.timeout ?? 1_000 });
-  if (!transport.value) throw new Error("hyperevm() returned no transport value.");
+  if (!transport.value) throw new Error("smartHyperevm() returned no transport value.");
   return { request: transport.request, value: transport.value };
 }
 

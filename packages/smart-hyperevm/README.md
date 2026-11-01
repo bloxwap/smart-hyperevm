@@ -24,17 +24,17 @@
 
 ## Performance
 
-One live HyperEVM run compared `hyperevm()` defaults with direct viem `http()` connections to four public RPC providers. The workload combined block-number, multicall, precompile, log, and balance reads. Latencies are p95 at the transport's `request`; lower is better.
+One live HyperEVM run compared `smartHyperevm()` defaults with direct viem `http()` connections to four public RPC providers. The workload combined block-number, multicall, precompile, log, and balance reads. Latencies are p95 at the transport's `request`; lower is better.
 
-| Transport                   | Sequential, all reads | Sequential, warm reads | Concurrent, mostly warm | Errors (sequential / concurrent) |
-| --------------------------- | --------------------: | ---------------------: | ----------------------: | -------------------------------: |
-| **`hyperevm()` (defaults)** |                129 ms |            **0.17 ms** |             **0.10 ms** |                      **0% / 0%** |
-| Hyperliquid (direct)        |                149 ms |                 149 ms |                  189 ms |                        75% / 90% |
-| HypurrScan (direct)         |                196 ms |                 196 ms |                  185 ms |                          0% / 0% |
-| dRPC (direct)               |                218 ms |                 223 ms |                  224 ms |                        20% / 20% |
-| Stakely (direct)            |              2,104 ms |               2,318 ms |                1,482 ms |                          0% / 1% |
+| Transport                        | Sequential, all reads | Sequential, warm reads | Concurrent, mostly warm | Errors (sequential / concurrent) |
+| -------------------------------- | --------------------: | ---------------------: | ----------------------: | -------------------------------: |
+| **`smartHyperevm()` (defaults)** |                129 ms |            **0.17 ms** |             **0.10 ms** |                      **0% / 0%** |
+| Hyperliquid (direct)             |                149 ms |                 149 ms |                  189 ms |                        75% / 90% |
+| HypurrScan (direct)              |                196 ms |                 196 ms |                  185 ms |                          0% / 0% |
+| dRPC (direct)                    |                218 ms |                 223 ms |                  224 ms |                        20% / 20% |
+| Stakely (direct)                 |              2,104 ms |               2,318 ms |                1,482 ms |                          0% / 1% |
 
-Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](https://bloxwap.github.io/smart-hyperevm/docs/benchmarks/#direct-provider-comparison).
+Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `smartHyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](https://bloxwap.github.io/smart-hyperevm/docs/benchmarks/#direct-provider-comparison).
 
 ## Documentation
 
@@ -74,12 +74,12 @@ yarn add @bloxwap/smart-hyperevm
 // 1. Import module
 import { createPublicClient } from "viem";
 import { hyperEvm } from "viem/chains";
-import { hyperevm } from "@bloxwap/smart-hyperevm";
+import { smartHyperevm } from "@bloxwap/smart-hyperevm";
 
 // 2. Set up client with transport
 const client = createPublicClient({
   chain: hyperEvm,
-  transport: hyperevm(),
+  transport: smartHyperevm(),
 });
 
 // 3. Query data
@@ -91,10 +91,10 @@ const block = await client.getBlockNumber();
 ```ts
 // 1. Import modules
 import { http } from "viem";
-import { hyperevm } from "@bloxwap/smart-hyperevm";
+import { smartHyperevm } from "@bloxwap/smart-hyperevm";
 
 // 2. Set up transport with your endpoints
-const transport = hyperevm({
+const transport = smartHyperevm({
   endpoints: ["https://rpc.hyperliquid.xyz/evm", http("https://rpc.hypurrscan.io", { batch: true })],
 });
 
@@ -109,9 +109,9 @@ Hedging is off unless you set `hedge`. When it is on, a slow idempotent read is 
 Use explicit, trusted endpoints in services and create the transport once per process or Worker isolate.
 
 ```ts
-import { hyperevm } from "@bloxwap/smart-hyperevm";
+import { smartHyperevm } from "@bloxwap/smart-hyperevm";
 
-const transport = hyperevm({
+const transport = smartHyperevm({
   endpoints: [
     { url: env.HYPERPC_URL, label: "hyperpc" },
     { url: env.DRPC_URL, label: "drpc" },
@@ -132,7 +132,7 @@ See [all options and defaults](https://bloxwap.github.io/smart-hyperevm/docs/rou
 ### Observe
 
 ```ts
-const transport = hyperevm({
+const transport = smartHyperevm({
   onEvent(event) {
     if (event.type === "failover") console.log(event.from, "->", event.to);
   },

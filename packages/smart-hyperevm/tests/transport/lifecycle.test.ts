@@ -9,7 +9,7 @@ import {
 import { hyperEvm } from "viem/chains";
 
 import { AllEndpointsFailedError, TransportClosedError } from "../../src/_errors.ts";
-import { hyperevm, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { smartHyperevm, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 const URLS = ["https://a.example.test/evm", "https://b.example.test/evm", "https://c.example.test/evm"] as const;
@@ -39,7 +39,7 @@ function mockFetch(): MockFetch {
 }
 
 function factory(fetch: MockFetch, headLag: HyperevmTransportOptions["headLag"]) {
-  return hyperevm({
+  return smartHyperevm({
     ...BASELINE,
     endpoints: [...URLS],
     fetchFn: fetch.fetchFn,
@@ -84,7 +84,7 @@ function failing(name: string): Transport {
     });
 }
 
-describe("hyperevm transport lifecycle", () => {
+describe("smartHyperevm transport lifecycle", () => {
   test("50 clients on one factory share one scoreboard and one probe timer", async () => {
     const fetch = mockFetch();
     const transport = factory(fetch, { probeInterval: 20 });
@@ -189,7 +189,7 @@ describe("hyperevm transport lifecycle", () => {
       });
     const client = createPublicClient({
       chain: hyperEvm,
-      transport: hyperevm({ ...BASELINE, endpoints: [node], headLag: false }),
+      transport: smartHyperevm({ ...BASELINE, endpoints: [node], headLag: false }),
     });
     const pending = client.request({ method: "eth_blockNumber" });
     await sleep(10);
@@ -201,7 +201,7 @@ describe("hyperevm transport lifecycle", () => {
 
   test("attempts and retry waits do not leave listeners on a long-lived signal", async () => {
     const tracked = trackedSignal();
-    const client = hyperevm({
+    const client = smartHyperevm({
       ...BASELINE,
       endpoints: [failing("first"), failing("second")],
       headLag: false,

@@ -127,15 +127,15 @@ export function resolveCache(value: boolean | CacheOptions | undefined): CacheCo
   };
   for (const name of ["maxStaleBlocks", "maxAgeMs", "hotKeys", "hotIdleMs", "maxEntries", "maxBytes"] as const) {
     if (!Number.isFinite(config[name]) || config[name] < 0) {
-      throw new Error(`hyperevm() cache.${name} must be a finite number, 0 or more, got ${config[name]}.`);
+      throw new Error(`smartHyperevm() cache.${name} must be a finite number, 0 or more, got ${config[name]}.`);
     }
   }
   if (!Number.isInteger(config.logsWindow) || config.logsWindow < 1) {
-    throw new Error(`hyperevm() cache.logsWindow must be an integer of at least 1, got ${config.logsWindow}.`);
+    throw new Error(`smartHyperevm() cache.logsWindow must be an integer of at least 1, got ${config.logsWindow}.`);
   }
   if (config.refreshInterval !== false && !(Number.isFinite(config.refreshInterval) && config.refreshInterval > 0)) {
     throw new Error(
-      `hyperevm() cache.refreshInterval must be a positive number or false, got ${config.refreshInterval}.`,
+      `smartHyperevm() cache.refreshInterval must be a positive number or false, got ${config.refreshInterval}.`,
     );
   }
   return config;

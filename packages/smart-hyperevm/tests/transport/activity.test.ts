@@ -9,7 +9,7 @@ import {
 import { hyperEvm } from "viem/chains";
 
 import { defaultIsActive } from "../../src/transport/_activity.ts";
-import { hyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { smartHyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 interface Node {
@@ -91,7 +91,7 @@ function sleep(ms: number): Promise<void> {
 function client(nodes: readonly Node[], options: HyperevmTransportOptions = {}) {
   return createPublicClient({
     chain: hyperEvm,
-    transport: hyperevm({
+    transport: smartHyperevm({
       ...BASELINE,
       endpoints: nodes.map((item, index) => ({ transport: item.transport, label: `node-${index}` })),
       hedge: false,
@@ -130,7 +130,7 @@ describe("defaultIsActive", () => {
   });
 });
 
-describe("hyperevm probes pause while inactive", () => {
+describe("smartHyperevm probes pause while inactive", () => {
   test("a hidden page sends no probe ticks or chain checks, and calls still run", async () => {
     fakeDocument("hidden");
     const nodes = [node("a"), node("b"), node("c")];
@@ -187,7 +187,7 @@ describe("hyperevm probes pause while inactive", () => {
 
   test("the visibility listener lives only while the probe timer runs", async () => {
     const document = fakeDocument("visible");
-    const transport = hyperevm({
+    const transport = smartHyperevm({
       ...BASELINE,
       endpoints: [{ transport: node("a").transport, label: "a" }],
       headLag: { probeInterval: 10, probeIdleTimeout: 30 },
@@ -329,7 +329,7 @@ describe("hyperevm probes pause while inactive", () => {
       return undefined;
     });
     const second = node("second");
-    const transport = hyperevm({
+    const transport = smartHyperevm({
       ...BASELINE,
       endpoints: [
         { transport: first.transport, label: "first" },
@@ -352,7 +352,7 @@ describe("hyperevm probes pause while inactive", () => {
     const slow = node("slow", (method) =>
       method === "eth_call" ? new Promise((resolve) => setTimeout(() => resolve("0x10"), 200)) : undefined,
     );
-    const transport = hyperevm({
+    const transport = smartHyperevm({
       ...BASELINE,
       endpoints: [{ transport: slow.transport, label: "slow" }],
       headLag: { probeInterval: 10 },

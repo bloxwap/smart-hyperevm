@@ -12,9 +12,9 @@ Pass public URLs, keyed provider URLs, or existing viem transports:
 
 ```ts
 import { http } from "viem";
-import { hyperevm } from "@bloxwap/smart-hyperevm";
+import { smartHyperevm } from "@bloxwap/smart-hyperevm";
 
-const transport = hyperevm({
+const transport = smartHyperevm({
   endpoints: [
     "https://rpc.hyperliquid.xyz/evm",
     { url: env.HYPERPC_URL, label: "hyperpc", rps: 10 },
@@ -52,7 +52,7 @@ See [Routing and caching](routing.md) for every default and the interactions bet
 Create one factory per process or Worker isolate and share it across clients. Use explicit endpoints you trust in services.
 
 ```ts
-const transport = hyperevm({
+const transport = smartHyperevm({
   endpoints: [
     { url: env.HYPERPC_URL, label: "hyperpc" },
     { url: env.DRPC_URL, label: "drpc" },
@@ -65,7 +65,7 @@ const transport = hyperevm({
 On Cloudflare Workers, disable timers outside requests:
 
 ```ts
-const transport = hyperevm({
+const transport = smartHyperevm({
   headLag: { probeInterval: false },
 });
 ```
@@ -77,7 +77,7 @@ Background cache refreshes end with a Worker invocation. Cached entries then exp
 Cached answers may be one block behind by default. A scanner that advances through every block should require the current head:
 
 ```ts
-const transport = hyperevm({
+const transport = smartHyperevm({
   cache: { maxStaleBlocks: 0 },
 });
 ```

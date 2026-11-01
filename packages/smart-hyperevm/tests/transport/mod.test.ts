@@ -10,7 +10,7 @@ import {
 import { hyperEvm } from "viem/chains";
 
 import { AllEndpointsFailedError } from "../../src/_errors.ts";
-import { hyperevm, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { hyperevm, smartHyperevm, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 interface MockEndpoint {
@@ -35,7 +35,7 @@ function mockEndpoint(name: string, handler: (method: string) => unknown | Promi
 }
 
 function open(options: HyperevmTransportOptions) {
-  return hyperevm({
+  return smartHyperevm({
     ...BASELINE,
     headLag: false,
     routing: "best",
@@ -52,12 +52,21 @@ function hang(method: string): Promise<never> {
   return new Promise(() => {});
 }
 
-describe("hyperevm transport", () => {
+describe("smartHyperevm transport", () => {
+  test("keeps hyperevm as a deprecated alias with the smartHyperevm key", () => {
+    expect(hyperevm).toBe(smartHyperevm);
+    const transport = smartHyperevm({ ...BASELINE, endpoints: [http("http://127.0.0.1:1")] })({ chain: hyperEvm });
+    expect(transport.config.key).toBe("smartHyperevm");
+    expect(transport.config.type).toBe("smartHyperevm");
+    expect(transport.config.name).toBe("Smart HyperEVM");
+    transport.value?.close();
+  });
+
   test("createPublicClient can read the chain id through the transport", async () => {
     const endpoint = mockEndpoint("only", (method) => (method === "eth_chainId" ? "0x3e7" : "0x1"));
     const client = createPublicClient({
       chain: hyperEvm,
-      transport: hyperevm({ ...BASELINE, endpoints: [endpoint.transport], headLag: false, routing: "best" }),
+      transport: smartHyperevm({ ...BASELINE, endpoints: [endpoint.transport], headLag: false, routing: "best" }),
     });
     expect(await client.getChainId()).toBe(999);
     expect(endpoint.calls.map((call) => call.method)).toContain("eth_chainId");
@@ -433,7 +442,7 @@ describe("head trust through viem http", () => {
   function reader(fetchFn: HyperevmTransportOptions["fetchFn"], routing: "best" | "p2c") {
     return createPublicClient({
       chain: hyperEvm,
-      transport: hyperevm({
+      transport: smartHyperevm({
         ...BASELINE,
         endpoints: ["https://a.example.test/evm", "https://b.example.test/evm", "https://c.example.test/evm"],
         fetchFn,

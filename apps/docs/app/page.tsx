@@ -30,11 +30,11 @@ const features = [
 
 const snippet = `import { createPublicClient } from "viem";
 import { hyperEvm } from "viem/chains";
-import { hyperevm } from "@bloxwap/smart-hyperevm";
+import { smartHyperevm } from "@bloxwap/smart-hyperevm";
 
 const client = createPublicClient({
   chain: hyperEvm,
-  transport: hyperevm(),
+  transport: smartHyperevm(),
 });
 
 const block = await client.getBlockNumber();

@@ -21,7 +21,7 @@ Edit Markdown in `content/docs`. Every page needs `title` and `description` fron
 
 ```sh
 bun run docs:check
-NEXT_PUBLIC_BASE_PATH=/hyperevm bun run docs:build
+NEXT_PUBLIC_BASE_PATH=/smart-hyperevm bun run docs:build
 ```
 
 The static export is written to `apps/docs/out`. The Documentation workflow checks pull requests and deploys `main` with GitHub Pages. Set **Settings → Pages → Source** to **GitHub Actions** before the first deployment.

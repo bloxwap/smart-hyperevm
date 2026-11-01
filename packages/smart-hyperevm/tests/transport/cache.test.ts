@@ -10,7 +10,7 @@ import {
   type HyperevmEvent,
   type HyperevmTransportOptions,
   type HyperevmTransportValue,
-  hyperevm,
+  smartHyperevm,
 } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
@@ -67,7 +67,7 @@ const START = 10_000_000;
 function open(options: HyperevmTransportOptions & { clock?: { now: number } } = {}): Opened {
   const clock = options.clock ?? { now: START };
   const events: HyperevmEvent[] = [];
-  const transport = hyperevm({
+  const transport = smartHyperevm({
     ...BASELINE,
     routing: "best",
     retryCount: 2,
@@ -80,7 +80,7 @@ function open(options: HyperevmTransportOptions & { clock?: { now: number } } = 
     onEvent: (event) => events.push(event),
     ...options,
   })({ timeout: options.timeout ?? 1_000 });
-  if (!transport.value) throw new Error("hyperevm() returned no transport value.");
+  if (!transport.value) throw new Error("smartHyperevm() returned no transport value.");
   return { request: transport.request, value: transport.value, events };
 }
 

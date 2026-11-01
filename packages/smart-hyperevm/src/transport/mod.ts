@@ -185,7 +185,7 @@ export interface HyperevmEndpointConfig {
 /** A URL, a viem transport, or an {@link HyperevmEndpointConfig}. */
 export type HyperevmEndpoint = string | Transport | HyperevmEndpointConfig;
 
-/** Options for {@link hyperevm}. Every field is optional. */
+/** Options for {@link smartHyperevm}. Every field is optional. */
 export interface HyperevmTransportOptions {
   /**
    * URLs, viem transports, or endpoint configs. URLs become `http()` or `webSocket()`.
@@ -206,9 +206,9 @@ export interface HyperevmTransportOptions {
   batch?: boolean | BatchOptions | undefined;
   /** Replaces `fetch` for URL endpoints. Tests use this. */
   fetchFn?: ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | undefined;
-  /** Transport key. Default: `"hyperevm"`. */
+  /** Transport key. Default: `"smartHyperevm"`. */
   key?: string | undefined;
-  /** Transport name. Default: `"HyperEVM"`. */
+  /** Transport name. Default: `"Smart HyperEVM"`. */
   name?: string | undefined;
   /**
    * Extra attempts after the first, for idempotent methods and raw transaction rebroadcasts.
@@ -350,7 +350,7 @@ export interface HyperevmTransportValue {
    * Stop the probe timer and reject later requests with `TransportClosedError`. Calls already in flight finish.
    * Calling it again does nothing.
    *
-   * One `hyperevm()` factory shares a single instance across instantiations with the same timeout,
+   * One `smartHyperevm()` factory shares a single instance across instantiations with the same timeout,
    * retryCount and chain id, so closing it closes every client built that way.
    * The next instantiation after `close()` builds a fresh instance.
    */
@@ -511,21 +511,26 @@ function sharedKey(timeout: number, retryCount: number, chain: Chain | undefined
   return `${timeout}:${retryCount}:${chain?.id ?? ""}`;
 }
 
+/** @deprecated Renamed to {@link smartHyperevm}. This alias will be removed in a future release. */
+export const hyperevm: typeof smartHyperevm = smartHyperevm;
+
 /**
  * viem `Transport` for HyperEVM (chain id 999).
  *
  * ```ts
  * import { createPublicClient } from "viem";
  * import { hyperEvm } from "viem/chains";
- * import { hyperevm } from "@bloxwap/smart-hyperevm";
+ * import { smartHyperevm } from "@bloxwap/smart-hyperevm";
  *
  * const client = createPublicClient({
  *   chain: hyperEvm,
- *   transport: hyperevm(),
+ *   transport: smartHyperevm(),
  * });
  * ```
  */
-export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyperevm", HyperevmTransportValue> {
+export function smartHyperevm(
+  options: HyperevmTransportOptions = {},
+): Transport<"smartHyperevm", HyperevmTransportValue> {
   const headLag = resolveHeadLag(options.headLag);
   const hedge = resolveHedge(options.hedge);
   const raceRivals = resolveRace(options.race);
@@ -536,7 +541,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
   const extraNonIdempotent = options.nonIdempotentMethods ?? [];
   // viem instantiates the transport once per client. Sharing keeps per-request clients
   // from multiplying probe timers or resetting learned scores.
-  const shared = new Map<string, ReturnType<Transport<"hyperevm", HyperevmTransportValue>>>();
+  const shared = new Map<string, ReturnType<Transport<"smartHyperevm", HyperevmTransportValue>>>();
   const rebroadcastRaw = options.rebroadcastRawTransactions ?? true;
   const breakerConfig = resolveBreaker(options.breaker);
   const pinConfig = resolvePin(options.pinLatest);
@@ -555,7 +560,7 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     const timeout = options.timeout ?? parameters.timeout ?? DEFAULT_TIMEOUT_MS;
     // viem reads a 0 timeout as none. Here it would fail every attempt on the next tick.
     if (!Number.isFinite(timeout) || timeout <= 0) {
-      throw new Error(`hyperevm() timeout must be a positive number of milliseconds, got ${timeout}.`);
+      throw new Error(`smartHyperevm() timeout must be a positive number of milliseconds, got ${timeout}.`);
     }
     const retryCount = options.retryCount ?? parameters.retryCount ?? DEFAULT_RETRY_COUNT;
     const retryDelay = options.retryDelay ?? 0;
@@ -568,8 +573,8 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
     if (built.length === 0) {
       throw new Error(
         options.endpoints === undefined
-          ? "hyperevm() requires at least one endpoint. The registry has none eligible."
-          : "hyperevm() requires at least one endpoint. `endpoints` is empty.",
+          ? "smartHyperevm() requires at least one endpoint. The registry has none eligible."
+          : "smartHyperevm() requires at least one endpoint. `endpoints` is empty.",
       );
     }
     for (const endpoint of built) budgets.configure(endpoint.id, endpoint.budget);
@@ -1282,12 +1287,12 @@ export function hyperevm(options: HyperevmTransportOptions = {}): Transport<"hyp
 
     const transport = createTransport(
       {
-        key: options.key ?? "hyperevm",
-        name: options.name ?? "HyperEVM",
+        key: options.key ?? "smartHyperevm",
+        name: options.name ?? "Smart HyperEVM",
         retryCount: 0,
         retryDelay,
         timeout,
-        type: "hyperevm",
+        type: "smartHyperevm",
         request: (async (args: EIP1193Parameters, requestOptions?: EIP1193RequestOptions): Promise<unknown> => {
           if (closed) throw new TransportClosedError();
           touch();
@@ -1514,7 +1519,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
     const given = config.url === undefined ? undefined : endpointUrlAt(config.url, index);
     const hint = retryHint();
     const transport = given ? toChildTransport(given, options, timeout, hint) : config.transport;
-    if (!transport) throw new Error(`hyperevm() endpoints[${index}] needs a url or a transport.`);
+    if (!transport) throw new Error(`smartHyperevm() endpoints[${index}] needs a url or a transport.`);
     const instance = transport({ chain, retryCount: 0, timeout });
     const childUrl = given ? undefined : endpointUrl(instance.value);
     const url = given ?? (childUrl === undefined ? undefined : tryEndpointUrl(childUrl));
@@ -1522,13 +1527,13 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
     if (!explicit && weight <= 0) return;
     if (url) {
       if (urls.has(url.url)) {
-        throw new Error(`hyperevm() endpoints list ${config.label ?? publicUrl(url)} more than once.`);
+        throw new Error(`smartHyperevm() endpoints list ${config.label ?? publicUrl(url)} more than once.`);
       }
       urls.add(url.url);
     }
     if (config.label !== undefined) {
       if (labels.has(config.label)) {
-        throw new Error(`hyperevm() endpoint label "${config.label}" is used more than once.`);
+        throw new Error(`smartHyperevm() endpoint label "${config.label}" is used more than once.`);
       }
       labels.add(config.label);
     }
@@ -1542,7 +1547,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
       secrets: secrets.filter((secret): secret is string => secret !== undefined),
       hint,
       budget:
-        resolveEndpointBudget(config, fallbackBudget, `hyperevm() endpoints[${index}]`) ??
+        resolveEndpointBudget(config, fallbackBudget, `smartHyperevm() endpoints[${index}]`) ??
         (fallbackBudget === false || !url ? undefined : KNOWN_BUDGETS.get(url.url)),
     });
   });
@@ -1566,7 +1571,7 @@ function buildEndpoints(options: HyperevmTransportOptions, chain: Chain | undefi
 function endpointConfig(input: HyperevmEndpoint, index: number): HyperevmEndpointConfig {
   if (typeof input === "string") return { url: input };
   if (typeof input === "function") return { transport: input };
-  const where = `hyperevm() endpoints[${index}]`;
+  const where = `smartHyperevm() endpoints[${index}]`;
   if ((input.url === undefined) === (input.transport === undefined)) {
     throw new Error(`${where} needs exactly one of url or transport.`);
   }
@@ -1581,7 +1586,7 @@ function endpointUrlAt(url: string, index: number): EndpointUrl {
   try {
     return normalizeEndpointUrl(url);
   } catch (error) {
-    throw new Error(`hyperevm() endpoints[${index}]: ${toError(error).message}`);
+    throw new Error(`smartHyperevm() endpoints[${index}]: ${toError(error).message}`);
   }
 }
 

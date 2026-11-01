@@ -16,8 +16,8 @@ describe("fallback simulation", () => {
       expect(report.calls).toBe(120);
 
       const deadFallback = series(report.deadFirst, "fallback");
-      const deadP2c = series(report.deadFirst, "hyperevm p2c");
-      const deadBest = series(report.deadFirst, "hyperevm best");
+      const deadP2c = series(report.deadFirst, "smartHyperevm p2c");
+      const deadBest = series(report.deadFirst, "smartHyperevm best");
       expect(deadFallback).toMatchObject({ median: 52, p95: 156, p99: 156, errors: 0, failovers: 120, staleRate: 0 });
       expect(deadFallback.busiestShare).toBeCloseTo(0.5, 10);
       expect(deadP2c).toMatchObject({ median: 72, p95: 288, p99: 480, errors: 0, failovers: 0, staleRate: 0 });
@@ -37,10 +37,10 @@ describe("fallback simulation", () => {
 
       const staleFallback = series(report.staleHead, "fallback");
       const staleRanked = series(report.staleHead, "fallback after one ping sort");
-      const staleP2c = series(report.staleHead, "hyperevm p2c");
-      const staleBest = series(report.staleHead, "hyperevm best");
-      const lagWeight = series(report.staleHead, "hyperevm p2c lagWeight 2");
-      const moreTail = series(report.staleHead, "hyperevm p2c latencyMix 0.4");
+      const staleP2c = series(report.staleHead, "smartHyperevm p2c");
+      const staleBest = series(report.staleHead, "smartHyperevm best");
+      const lagWeight = series(report.staleHead, "smartHyperevm p2c lagWeight 2");
+      const moreTail = series(report.staleHead, "smartHyperevm p2c latencyMix 0.4");
       expect(staleFallback).toMatchObject({ median: 34, p99: 102, errors: 0, failovers: 120, staleRate: 1 });
       expect(staleRanked).toMatchObject({
         median: 22,

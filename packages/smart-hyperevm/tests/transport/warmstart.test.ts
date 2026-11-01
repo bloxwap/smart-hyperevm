@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createTransport, type EIP1193Parameters, type EIP1193RequestFn, type Transport } from "viem";
 
 import {
-  hyperevm,
+  smartHyperevm,
   localStoragePersistence,
   type HyperevmEvent,
   type HyperevmTransportOptions,
@@ -64,15 +64,15 @@ interface Opened {
 }
 
 /** Instantiate with a 1000ms timeout. viem types `value` as optional, and every test here needs it. */
-function instantiate(factory: Transport<"hyperevm", HyperevmTransportValue>): Opened {
+function instantiate(factory: Transport<"smartHyperevm", HyperevmTransportValue>): Opened {
   const transport = factory({ timeout: 1_000 });
-  if (!transport.value) throw new Error("hyperevm() returned no value");
+  if (!transport.value) throw new Error("smartHyperevm() returned no value");
   return { request: transport.request, value: transport.value };
 }
 
 function open(time: Clock, endpoints: readonly MockEndpoint[], options: HyperevmTransportOptions = {}): Opened {
   return instantiate(
-    hyperevm({
+    smartHyperevm({
       ...BASELINE,
       endpoints: endpoints.map((endpoint, index) => ({ transport: endpoint.transport, label: `node${index}` })),
       headLag: false,
@@ -301,7 +301,7 @@ describe("score snapshots", () => {
     };
     const saved: ScoreSnapshot[] = [];
     const transport = instantiate(
-      hyperevm({
+      smartHyperevm({
         ...BASELINE,
         endpoints: [
           { url: "https://hyperpc.example.test/evm?apikey=HYPERPC_SECRET", label: "hyperpc" },
@@ -396,7 +396,7 @@ describe("persist", () => {
   test("load runs once per instance, on the first request, not when the transport is built", async () => {
     const time = clock();
     let loads = 0;
-    const factory = hyperevm({
+    const factory = smartHyperevm({
       ...BASELINE,
       endpoints: [mockEndpoint("a", time, 1).transport],
       headLag: false,
@@ -559,7 +559,7 @@ describe("persist", () => {
     const time = clock();
     const events: HyperevmEvent[] = [];
     let saves = 0;
-    const factory = hyperevm({
+    const factory = smartHyperevm({
       ...BASELINE,
       endpoints: [{ transport: mockEndpoint("a", time, 1).transport, label: "node0" }],
       headLag: false,

@@ -38,7 +38,7 @@ export function defaultBurst(rps: number): number {
 /** Validate the transport-wide `budget` option. */
 export function resolveDefaultBudget(value: BudgetOptions | false | undefined): BudgetConfig | false | undefined {
   if (value === false || value === undefined) return value;
-  return validBudget(value.rps, value.burst, "hyperevm() budget");
+  return validBudget(value.rps, value.burst, "smartHyperevm() budget");
 }
 
 /**

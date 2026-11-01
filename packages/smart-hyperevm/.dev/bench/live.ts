@@ -14,7 +14,7 @@ import { dirname } from "node:path";
 
 import { fallback, http, type EIP1193Parameters, type Transport } from "viem";
 
-import { hyperevm, type HyperevmEvent } from "../../src/mod.ts";
+import { smartHyperevm, type HyperevmEvent } from "../../src/mod.ts";
 import { registryHttpEndpoints } from "../../src/registry/mod.ts";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -107,7 +107,7 @@ async function timeFallback(transport: Transport): Promise<LiveSample[]> {
 async function timeHyperevm(transport: Transport): Promise<LiveSample[]> {
   const client = transport({ retryCount: 0, timeout: TIMEOUT_MS });
   const value = client.value;
-  if (!value || !("onEvent" in value)) throw new Error("hyperevm transport is missing onEvent");
+  if (!value || !("onEvent" in value)) throw new Error("smartHyperevm transport is missing onEvent");
   const samples: LiveSample[] = [];
   for (let round = 0; round < 2; round += 1) {
     for (const call of CALLS) {
@@ -192,7 +192,7 @@ const report = {
       ),
     ),
   ),
-  hyperevm: summarize("hyperevm", await timeHyperevm(hyperevm({ timeout: TIMEOUT_MS }))),
+  smartHyperevm: summarize("smartHyperevm", await timeHyperevm(smartHyperevm({ timeout: TIMEOUT_MS }))),
 };
 
 const json = JSON.stringify(report, null, 2);

@@ -16,7 +16,7 @@ import { hyperEvm } from "viem/chains";
 import { ChainMismatchError, TimeoutError } from "../../src/_errors.ts";
 import { defaultRegistry } from "../../src/registry/mod.ts";
 import { normalizeRpcUrl } from "../../src/registry/_url.ts";
-import { hyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
+import { smartHyperevm, type HyperevmEvent, type HyperevmTransportOptions } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 const HYPERPC = "https://hyperpc.example.test/evm?apikey=HYPERPC_SECRET";
@@ -82,7 +82,7 @@ function chainOf(id: string): (method: string) => string {
 }
 
 function open(options: HyperevmTransportOptions, timeout = 1_000) {
-  return hyperevm({ ...BASELINE, headLag: false, routing: "best", hedge: false, retryCount: 2, ...options })({
+  return smartHyperevm({ ...BASELINE, headLag: false, routing: "best", hedge: false, retryCount: 2, ...options })({
     timeout,
   });
 }
@@ -127,7 +127,7 @@ describe("explicit endpoints that carry keys", () => {
   test("accepts key-bearing URLs and never exposes them", async () => {
     const seen: Seen[] = [];
     const events: HyperevmEvent[] = [];
-    const transport = hyperevm({
+    const transport = smartHyperevm({
       ...BASELINE,
       endpoints: [HYPERPC, DRPC, PUBLIC],
       fetchFn: rpcFetch(healthy, seen),
@@ -501,7 +501,7 @@ describe("endpoint list validation", () => {
   });
 
   test("the default endpoint list uses the shipped registry weights", () => {
-    const client = hyperevm({ ...BASELINE, headLag: false })({ timeout: 1_000 });
+    const client = smartHyperevm({ ...BASELINE, headLag: false })({ timeout: 1_000 });
     expect(client.value?.endpoints.length).toBeGreaterThan(0);
     expect(client.value?.endpoints.every((endpoint) => endpoint.weight > 0)).toBe(true);
   });
@@ -509,7 +509,9 @@ describe("endpoint list validation", () => {
   test("an empty shipped registry reports that no endpoints are eligible", () => {
     const endpoints = defaultRegistry.endpoints.splice(0);
     try {
-      expect(() => hyperevm({ ...BASELINE, headLag: false })({ timeout: 1_000 })).toThrow(/registry has none eligible/);
+      expect(() => smartHyperevm({ ...BASELINE, headLag: false })({ timeout: 1_000 })).toThrow(
+        /registry has none eligible/,
+      );
     } finally {
       defaultRegistry.endpoints.push(...endpoints);
     }
@@ -519,7 +521,13 @@ describe("endpoint list validation", () => {
 describe("option resolution", () => {
   test("options.timeout wins over the client timeout", async () => {
     const hung = mockEndpoint("hung", (method) => (method === "eth_chainId" ? "0x3e7" : new Promise(() => {})));
-    const client = hyperevm({ ...BASELINE, endpoints: [hung.transport], timeout: 30, retryCount: 0, headLag: false })({
+    const client = smartHyperevm({
+      ...BASELINE,
+      endpoints: [hung.transport],
+      timeout: 30,
+      retryCount: 0,
+      headLag: false,
+    })({
       timeout: 60_000,
     });
     expect(client.config.timeout).toBe(30);
@@ -658,7 +666,7 @@ describe("chain id verification", () => {
     const testnet = mockEndpoint("testnet", chainOf("0x3e6"));
     const client = createPublicClient({
       chain: { ...hyperEvm, id: 998 },
-      transport: hyperevm({ ...BASELINE, endpoints: [testnet.transport], headLag: false }),
+      transport: smartHyperevm({ ...BASELINE, endpoints: [testnet.transport], headLag: false }),
     });
     expect(await client.getBlockNumber()).toBe(1n);
   });

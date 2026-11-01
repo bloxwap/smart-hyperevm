@@ -318,7 +318,9 @@ function readBook(raw: unknown, savedAt: number, capMs: number): { stat: MethodS
 function nonNegative(value: number | undefined, name: string, fallback: number): number {
   if (value === undefined) return fallback;
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`hyperevm() persist.${name} must be a finite number of milliseconds, 0 or more, got ${value}.`);
+    throw new Error(
+      `smartHyperevm() persist.${name} must be a finite number of milliseconds, 0 or more, got ${value}.`,
+    );
   }
   return value;
 }

@@ -1,7 +1,7 @@
 /**
  * Latency-aware JSON-RPC transport for HyperEVM.
  *
- * The main entrypoint exports {@link hyperevm}, the errors it raises, and the
+ * The main entrypoint exports {@link smartHyperevm}, the errors it raises, and the
  * shipped registry helpers.
  *
  * Tree-shakeable imports:
@@ -12,11 +12,11 @@
  * ```ts
  * import { createPublicClient } from "viem";
  * import { hyperEvm } from "viem/chains";
- * import { hyperevm } from "@bloxwap/smart-hyperevm";
+ * import { smartHyperevm } from "@bloxwap/smart-hyperevm";
  *
  * const client = createPublicClient({
  *   chain: hyperEvm,
- *   transport: hyperevm(),
+ *   transport: smartHyperevm(),
  * });
  * ```
  *
@@ -60,6 +60,7 @@ export {
   defaultScoreConfig,
   endpointScore,
   hyperevm,
+  smartHyperevm,
   inflation,
   isIdempotentMethod,
   isRebroadcastMethod,

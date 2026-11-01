@@ -8,7 +8,7 @@ import {
 } from "viem";
 import { hyperEvm } from "viem/chains";
 
-import { hyperevm, type HyperevmEvent } from "../../src/transport/mod.ts";
+import { smartHyperevm, type HyperevmEvent } from "../../src/transport/mod.ts";
 import { BASELINE } from "./_baseline.ts";
 
 /**
@@ -54,7 +54,7 @@ describe("chain verification and the breaker", () => {
   test("a 429 storm on the chain check is ejected and costs one request per call", async () => {
     const methods: string[] = [];
     const events: HyperevmEvent[] = [];
-    const client = hyperevm({
+    const client = smartHyperevm({
       ...BASELINE,
       endpoints: [A, B, C],
       fetchFn: failingFetch(429, methods),
@@ -79,7 +79,7 @@ describe("chain verification and the breaker", () => {
     const methods: string[] = [];
     const events: HyperevmEvent[] = [];
     const good = mockEndpoint("good", (method) => (method === "eth_chainId" ? "0x3e7" : "0x1"));
-    const client = hyperevm({
+    const client = smartHyperevm({
       ...BASELINE,
       endpoints: [A, { transport: good.transport, label: "good" }],
       fetchFn: failingFetch(429, methods, { "retry-after": "30" }),
@@ -112,7 +112,7 @@ describe("availability", () => {
       });
     const first = broken("first");
     const second = broken("second");
-    const client = hyperevm({
+    const client = smartHyperevm({
       ...BASELINE,
       endpoints: [testnet.transport, liar.transport, first.transport, second.transport],
       headLag: { probeInterval: false },
@@ -145,7 +145,7 @@ describe("availability", () => {
       if (!healthy) throw new Error("socket hang up");
       return "0x1";
     });
-    const client = hyperevm({ ...BASELINE, endpoints: [node.transport], headLag: false })({ timeout: 1_000 });
+    const client = smartHyperevm({ ...BASELINE, endpoints: [node.transport], headLag: false })({ timeout: 1_000 });
     await expect(client.request({ method: "eth_call", params: [] })).rejects.toThrow();
     healthy = true;
     expect(await client.request({ method: "eth_call", params: [] })).toBe("0x1");
@@ -155,7 +155,7 @@ describe("availability", () => {
 describe("shared instances", () => {
   test("clients on one factory share chain verdicts and breaker state", async () => {
     const node = mockEndpoint("node", (method) => (method === "eth_chainId" ? "0x3e7" : "0x1"));
-    const transport = hyperevm({ ...BASELINE, endpoints: [node.transport], headLag: { probeInterval: false } });
+    const transport = smartHyperevm({ ...BASELINE, endpoints: [node.transport], headLag: { probeInterval: false } });
     for (let index = 0; index < 5; index += 1) {
       await createPublicClient({ chain: hyperEvm, transport }).request({ method: "eth_blockNumber" });
     }
