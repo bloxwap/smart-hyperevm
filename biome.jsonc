@@ -4,7 +4,17 @@
     "enabled": false
   },
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/dist", "!**/coverage"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/coverage",
+      "!**/.turbo",
+      "!apps/docs/.next",
+      "!apps/docs/.source",
+      "!apps/docs/out",
+      "!apps/docs/next-env.d.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -21,6 +31,11 @@
       "arrowParentheses": "always",
       "bracketSpacing": true,
       "quoteProperties": "asNeeded"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
     }
   },
   "json": {
@@ -55,7 +70,7 @@
   },
   "overrides": [
     {
-      "includes": ["**/tests/**", "**/.dev/**"],
+      "includes": ["**/tests/**", "**/.dev/**", "apps/docs/**"],
       "linter": {
         "rules": {
           "suspicious": {

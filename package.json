@@ -3,24 +3,32 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "packageManager": "bun@1.4.4",
   "workspaces": [
+    "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "check": "bun run check:format && bun run check:lint && bun run check:sdk",
+    "dev": "turbo run dev",
+    "check": "bun run check:format && bun run check:lint && bun run check:docs && bun run check:sdk",
     "check:format": "biome format .",
     "check:lint": "biome lint .",
+    "check:docs": "cd apps/docs && bun run check",
     "check:sdk": "cd packages/hyperevm && bun run typecheck",
     "format": "biome format --write .",
     "lint": "biome lint --write .",
     "typecheck": "bun run check:sdk",
     "test": "cd packages/hyperevm && bun run test",
     "build": "cd packages/hyperevm && bun run build",
+    "docs:dev": "turbo run dev --filter=@bloxwap/hyperevm-docs",
+    "docs:build": "cd apps/docs && bun run build",
+    "docs:check": "cd apps/docs && bun run check",
     "rank": "cd packages/hyperevm && bun run rank",
     "bench": "cd packages/hyperevm && bun run bench",
     "bench:live": "cd packages/hyperevm && bun run bench:live"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.15"
+    "@biomejs/biome": "2.6.3",
+    "turbo": "2.11.10"
   }
 }

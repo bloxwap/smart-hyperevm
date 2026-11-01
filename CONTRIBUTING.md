@@ -32,9 +32,7 @@ One endpoint per pull request is easiest to review.
   "url": "https://rpc.example/evm",
   "kind": "http",
   "tracking": "unknown",
-  "sources": [
-    { "name": "community", "url": "https://example.com/where-you-saw-it" }
-  ],
+  "sources": [{ "name": "community", "url": "https://example.com/where-you-saw-it" }],
   "submission": "community",
   "addedAt": "2026-10-30T00:00:00.000Z",
   "eligible": false,
@@ -46,7 +44,7 @@ One endpoint per pull request is easiest to review.
 
 `sources[0].url` should be a page that lists this endpoint, not a private dashboard. Set `tracking` to `none`, `limited`, or `yes` when the operator says whether they log requests. Use `unknown` when you do not know.
 
-4. Leave `eligible`, `weight`, `rank`, and `stats` as above. Do not copy a weight from another row. The ranker is the only writer of those fields. A new URL stays on the new-node cap (weight 0.15) until it has at least three successful probes spread across 14 days, with uptime of at least 0.8. Until then it is usable, but it cannot take the pool. See [docs/ranking.md](docs/ranking.md).
+4. Leave `eligible`, `weight`, `rank`, and `stats` as above. Do not copy a weight from another row. The ranker is the only writer of those fields. A new URL stays on the new-node cap (weight 0.15) until it has at least three successful probes spread across 14 days, with uptime of at least 0.8. Until then it is usable, but it cannot take the pool. See [Routing and caching](apps/docs/content/docs/routing.md).
 5. Run `bun run test` so the file still matches the schema checks.
 
 Community rows are kept when upstream lists forget them. An upstream row that disappears from every source is removed on the next successful rank run.

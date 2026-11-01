@@ -1,4 +1,10 @@
-# Ranking
+---
+
+title: Routing and caching
+description: Detailed transport scoring, failover, request coalescing, caching, and registry ranking behavior.
+---
+
+# Routing and caching
 
 `@bloxwap/hyperevm` has two rankers. They answer different questions.
 
@@ -59,11 +65,11 @@ Routing skips a spent endpoint while another candidate in the same breaker state
 
 The registry does not ship budgets; only the official RPC's is built in. These are the rates the monorepo router uses for one IP. Only the official endpoint's is documented (about 100 requests a minute). The rest are guesses.
 
-| Endpoint | rps |
-| --- | --- |
-| `https://rpc.hyperliquid.xyz/evm` | 1.5 |
-| `https://rpc.purroofgroup.com`, `https://hyperliquid.drpc.org`, `https://999.rpc.thirdweb.com`, `https://rpc.hypurrscan.io` | 10 |
-| `https://hyperliquid-json-rpc.stakely.io`, `https://rpc.hyperlend.finance` | 5 |
+| Endpoint                                                                                                                    | rps |
+| --------------------------------------------------------------------------------------------------------------------------- | --- |
+| `https://rpc.hyperliquid.xyz/evm`                                                                                           | 1.5 |
+| `https://rpc.purroofgroup.com`, `https://hyperliquid.drpc.org`, `https://999.rpc.thirdweb.com`, `https://rpc.hypurrscan.io` | 10  |
+| `https://hyperliquid-json-rpc.stakely.io`, `https://rpc.hyperlend.finance`                                                  | 5   |
 
 With the default 4 second probe, head probes alone spend 0.25 rps per endpoint.
 
@@ -174,15 +180,15 @@ Racing, pinning, coalescing, budgets, warm start, the activity pause, and the re
 - A cache refresh is pinned to the newest head and sent to its holders alone, through the shared request table, so a call that misses joins it. It is never raced or hedged, spends one token, and is skipped while the page is hidden or the holders are spent.
 - `close()` stops the probe timer and the cache tick, removes the visibility listener, and saves scores once.
 
-| Option | Default | Section |
-| --- | --- | --- |
-| `race: boolean \| { width }` | on, width 2 | [Racing](#racing) |
-| `pinLatest: boolean \| { freshMs, blockNumber }` | on. `freshMs` 1000, `blockNumber` true | [Pinned latest](#pinned-latest) |
-| `coalesce: boolean` | on | [Coalescing](#coalescing) |
-| `budget: { rps, burst } \| false`, endpoint `{ rps, burst }` | official RPC 1.5 rps, burst 3; others none. `burst` is `max(1, ceil(rps * 2))` | [Request budgets](#request-budgets) |
-| `persist: { load, save, maxAge, saveInterval }` | off. `maxAge` 1 hour, `saveInterval` 10 seconds | [Warm start](#warm-start) |
-| `isActive: () => boolean` | false only in a hidden browser tab | [Inactive pages and apps](#inactive-pages-and-apps) |
-| `cache: boolean \| { maxStaleBlocks, maxAgeMs, refreshInterval, hotKeys, hotIdleMs, maxEntries, maxBytes, logsWindow, copyResults, immutableParams }` | on. `maxStaleBlocks` 1, `maxAgeMs` 2000, `refreshInterval` 1000, `hotKeys` 64, `hotIdleMs` 30000, `maxEntries` 1000, `maxBytes` 8 MiB, `logsWindow` 1000, `copyResults` true, `immutableParams` false | [Read cache](#read-cache) |
+| Option                                                                                                                                                | Default                                                                                                                                                                                               | Section                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `race: boolean \| { width }`                                                                                                                          | on, width 2                                                                                                                                                                                           | [Racing](#racing)                                   |
+| `pinLatest: boolean \| { freshMs, blockNumber }`                                                                                                      | on. `freshMs` 1000, `blockNumber` true                                                                                                                                                                | [Pinned latest](#pinned-latest)                     |
+| `coalesce: boolean`                                                                                                                                   | on                                                                                                                                                                                                    | [Coalescing](#coalescing)                           |
+| `budget: { rps, burst } \| false`, endpoint `{ rps, burst }`                                                                                          | official RPC 1.5 rps, burst 3; others none. `burst` is `max(1, ceil(rps * 2))`                                                                                                                        | [Request budgets](#request-budgets)                 |
+| `persist: { load, save, maxAge, saveInterval }`                                                                                                       | off. `maxAge` 1 hour, `saveInterval` 10 seconds                                                                                                                                                       | [Warm start](#warm-start)                           |
+| `isActive: () => boolean`                                                                                                                             | false only in a hidden browser tab                                                                                                                                                                    | [Inactive pages and apps](#inactive-pages-and-apps) |
+| `cache: boolean \| { maxStaleBlocks, maxAgeMs, refreshInterval, hotKeys, hotIdleMs, maxEntries, maxBytes, logsWindow, copyResults, immutableParams }` | on. `maxStaleBlocks` 1, `maxAgeMs` 2000, `refreshInterval` 1000, `hotKeys` 64, `hotIdleMs` 30000, `maxEntries` 1000, `maxBytes` 8 MiB, `logsWindow` 1000, `copyResults` true, `immutableParams` false | [Read cache](#read-cache)                           |
 
 ## Registry score
 
@@ -205,7 +211,7 @@ Inside the window (28 days):
 
 WebSocket URLs are stored and are not part of the default HTTP pool. The transport will use a `wss://` URL when you pass it yourself.
 
-Community submissions (see [CONTRIBUTING.md](../CONTRIBUTING.md)) stay in the file when upstream lists stop mentioning them. An upstream URL that disappears from every source is removed on the next successful run.
+Community submissions (see [CONTRIBUTING.md](https://github.com/bloxwap/hyperevm/blob/main/CONTRIBUTING.md)) stay in the file when upstream lists stop mentioning them. An upstream URL that disappears from every source is removed on the next successful run.
 
 If a source list fails to download, the script exits and does not write. If a registry that already had eligible endpoints gets a run where nobody returns chain id 999, or a ranking that leaves no endpoint eligible (for example when every HyperCore read probe fails at once), the script also refuses to write. One bad network day must not empty the pool.
 
@@ -213,13 +219,13 @@ If a source list fails to download, the script exits and does not write. If a re
 
 The ranker reads only these documents:
 
-| Source | What it contributes |
-| --- | --- |
+| Source                                                                                                                          | What it contributes                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | [chainlist `chainid-999.js`](https://github.com/DefiLlama/chainlist/blob/main/constants/additionalChainRegistry/chainid-999.js) | HyperEVM's `rpc` array. The file's name and `"chainId": 999` are both required, so a different chain cannot be parsed by accident. |
-| [chainlist `extraRpcs.js`](https://github.com/DefiLlama/chainlist/blob/main/constants/extraRpcs.js) | The `999` object only. Chainlist's chain id table labels 999 as Hyperliquid. |
-| [ChainIndex](https://www.chainindex.dev/chains/hyperevm) | RPC-shaped links on the HyperEVM page. |
-| [OpenChainBench](https://openchainbench.com/benchmarks/hyperliquid-rpc) | RPC-shaped links on the Hyperliquid public-endpoint benchmark. |
-| [Hyperliquid docs](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm) | The documented mainnet URL. Testnet URLs in the same page are dropped. |
+| [chainlist `extraRpcs.js`](https://github.com/DefiLlama/chainlist/blob/main/constants/extraRpcs.js)                             | The `999` object only. Chainlist's chain id table labels 999 as Hyperliquid.                                                       |
+| [ChainIndex](https://www.chainindex.dev/chains/hyperevm)                                                                        | RPC-shaped links on the HyperEVM page.                                                                                             |
+| [OpenChainBench](https://openchainbench.com/benchmarks/hyperliquid-rpc)                                                         | RPC-shaped links on the Hyperliquid public-endpoint benchmark.                                                                     |
+| [Hyperliquid docs](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm)                                     | The documented mainnet URL. Testnet URLs in the same page are dropped.                                                             |
 
 URLs with a query string, a username, or a hash are rejected. `http://` is rejected. Anything whose URL contains `testnet` is rejected.
 

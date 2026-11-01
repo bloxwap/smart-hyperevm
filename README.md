@@ -9,31 +9,31 @@
 
 ## Features
 
-| Feature | Value |
-| --- | --- |
-| Adaptive routing | Routes by per-method latency, errors, load, and block lag. |
-| Racing & failover | Parallel reads, hedging, retries, circuit breakers, and rate-limit budgets. |
-| Warm cache | Sub-millisecond reads, background refresh, and local block numbers. |
-| Incremental logs | Rolling 1,000-block index; fetches only new blocks. |
-| Consistent reads | Pins `"latest"` across endpoints. |
-| Request efficiency | Coalescing, HTTP batching, and memoized hot paths. |
-| Lifecycle | Saved scores, hidden-tab pause, and idle shutdown. |
-| Integration | TypeScript, drop-in viem transport, and offline CI tests. |
-| Runtimes | Bun, Node.js, browsers, and edge; no runtime dependencies beyond peer viem. |
+| Feature            | Value                                                                       |
+| ------------------ | --------------------------------------------------------------------------- |
+| Adaptive routing   | Routes by per-method latency, errors, load, and block lag.                  |
+| Racing & failover  | Parallel reads, hedging, retries, circuit breakers, and rate-limit budgets. |
+| Warm cache         | Sub-millisecond reads, background refresh, and local block numbers.         |
+| Incremental logs   | Rolling 1,000-block index; fetches only new blocks.                         |
+| Consistent reads   | Pins `"latest"` across endpoints.                                           |
+| Request efficiency | Coalescing, HTTP batching, and memoized hot paths.                          |
+| Lifecycle          | Saved scores, hidden-tab pause, and idle shutdown.                          |
+| Integration        | TypeScript, drop-in viem transport, and offline CI tests.                   |
+| Runtimes           | Bun, Node.js, browsers, and edge; no runtime dependencies beyond peer viem. |
 
 ## Performance
 
 One live HyperEVM run compared `hyperevm()` defaults with direct viem `http()` connections to four public RPC providers. The workload combined block-number, multicall, precompile, log, and balance reads. Latencies are p95 at the transport's `request`; lower is better.
 
-| Transport | Sequential, all reads | Sequential, warm reads | Concurrent, mostly warm | Errors (sequential / concurrent) |
-| --- | ---: | ---: | ---: | ---: |
-| **`hyperevm()` (defaults)** | 129 ms | **0.17 ms** | **0.10 ms** | **0% / 0%** |
-| Hyperliquid (direct) | 149 ms | 149 ms | 189 ms | 75% / 90% |
-| HypurrScan (direct) | 196 ms | 196 ms | 185 ms | 0% / 0% |
-| dRPC (direct) | 218 ms | 223 ms | 224 ms | 20% / 20% |
-| Stakely (direct) | 2,104 ms | 2,318 ms | 1,482 ms | 0% / 1% |
+| Transport                   | Sequential, all reads | Sequential, warm reads | Concurrent, mostly warm | Errors (sequential / concurrent) |
+| --------------------------- | --------------------: | ---------------------: | ----------------------: | -------------------------------: |
+| **`hyperevm()` (defaults)** |                129 ms |            **0.17 ms** |             **0.10 ms** |                      **0% / 0%** |
+| Hyperliquid (direct)        |                149 ms |                 149 ms |                  189 ms |                        75% / 90% |
+| HypurrScan (direct)         |                196 ms |                 196 ms |                  185 ms |                          0% / 0% |
+| dRPC (direct)               |                218 ms |                 223 ms |                  224 ms |                        20% / 20% |
+| Stakely (direct)            |              2,104 ms |               2,318 ms |                1,482 ms |                          0% / 1% |
 
-Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](docs/benchmarks.md#direct-provider-comparison).
+Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](https://bloxwap.github.io/hyperevm/docs/benchmarks/#direct-provider-comparison).
 
 ## Installation
 
@@ -61,11 +61,9 @@ pnpm add @bloxwap/hyperevm
 yarn add @bloxwap/hyperevm
 ```
 
-> These are the commands a published release will use. `@bloxwap/hyperevm` is still private, so the registry 404s until a publish is approved. Clone this repository to use the source today. `github:bloxwap/hyperevm` resolves to the private workspace root, which does not export the transport. pnpm can select the library with `github:bloxwap/hyperevm#path:packages/hyperevm`.
-
 ## Release status
 
-`0.1.0` is an early developer preview. The package stays private until a publish is approved. Expect breaking changes before `1.0`.
+`0.1.0` is an early developer preview. Expect breaking changes before `1.0`.
 
 ## Usage
 
@@ -93,10 +91,7 @@ import { http } from "viem";
 import { hyperevm } from "@bloxwap/hyperevm";
 
 const transport = hyperevm({
-  endpoints: [
-    "https://rpc.hyperliquid.xyz/evm",
-    http("https://rpc.hypurrscan.io", { batch: true }),
-  ],
+  endpoints: ["https://rpc.hyperliquid.xyz/evm", http("https://rpc.hypurrscan.io", { batch: true })],
   hedge: { minDelay: 250, multiplier: 2 },
 });
 ```
@@ -144,7 +139,7 @@ Use `onEvent` for telemetry and `transport.value.snapshot()` for current routing
 
 ## Documentation
 
-See [routing and cache details](docs/ranking.md), [benchmarks](docs/benchmarks.md), and the [package reference](packages/hyperevm/README.md). Public endpoint submissions are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
+Browse the [full documentation](https://bloxwap.github.io/hyperevm/docs/) for configuration, routing, caching, telemetry, and benchmarks. Public endpoint submissions are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
 
@@ -155,7 +150,7 @@ bun run test
 bun run build
 ```
 
-`bun run rank` updates the registry from live public-endpoint probes.
+Run `bun dev` (or `bun run docs:dev`) from the repository root to start the documentation site in Turbo's terminal UI at [localhost:3915](http://localhost:3915); use `bun dev --ui=stream` for plain logs. `bun run docs:build` writes its static export. `bun run rank` updates the registry from live public-endpoint probes.
 
 ## Security
 

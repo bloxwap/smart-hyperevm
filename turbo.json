@@ -1,0 +1,12 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "ui": "tui",
+  "envMode": "strict",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["NEXT_PUBLIC_BASE_PATH", "NEXT_TELEMETRY_DISABLED"]
+    }
+  }
+}
