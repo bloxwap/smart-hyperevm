@@ -1,7 +1,6 @@
 "use client";
 
-import { Button } from "@bloxwap/hig-react/button";
-import { useState } from "react";
+import { Tabs } from "@bloxwap/hig-react/navigation";
 import { CopyButton } from "./copy-button";
 
 const installers = [
@@ -11,27 +10,25 @@ const installers = [
   { name: "yarn", command: "yarn add @bloxwap/hyperevm" },
 ];
 
+/** HIG Tabs own the package-manager selection (roving focus, arrow/Home/End keys, tab/panel wiring). */
 export function InstallCommand() {
-  const [active, setActive] = useState(0);
   return (
-    <div className="install-picker">
-      <fieldset className="install-tabs hig-group" aria-label="Package manager">
-        {installers.map((installer, index) => (
-          <Button
-            key={installer.name}
-            intent={index === active ? "secondary" : "ghost"}
-            aria-pressed={index === active}
-            onClick={() => setActive(index)}
-          >
-            {installer.name}
-          </Button>
-        ))}
-      </fieldset>
-      <div className="install-command">
-        <span aria-hidden="true">$</span>
-        <code>{installers[active].command}</code>
-        <CopyButton text={installers[active].command} label="Copy install command" className="install-copy" />
-      </div>
+    <div className="install-picker" data-hig-density="compact">
+      <Tabs
+        label="Package manager"
+        defaultValue="bun"
+        items={installers.map(({ name, command }) => ({
+          value: name,
+          label: name,
+          content: (
+            <div className="install-command">
+              <span aria-hidden="true">$</span>
+              <code>{command}</code>
+              <CopyButton text={command} label="Copy install command" className="install-copy" />
+            </div>
+          ),
+        }))}
+      />
     </div>
   );
 }

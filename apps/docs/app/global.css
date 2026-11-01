@@ -167,43 +167,24 @@ textarea:focus-visible {
 }
 
 .install-picker {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: --spacing(2);
+  width: fit-content;
   max-width: 100%;
 }
 
-.install-tabs {
-  display: inline-flex;
+.install-picker [role="tablist"] {
   gap: --spacing(1);
-  padding: --spacing(1);
-  border-radius: 9999px;
-  background: var(--hig-surface);
-}
-
-.install-tabs > .hig-button {
-  padding: 0 --spacing(4);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 500;
-}
-
-.install-tabs > .hig-button[aria-pressed="false"] {
-  background: transparent;
-  color: var(--hig-muted);
 }
 
 .install-command {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: --spacing(3);
-  max-width: 100%;
-  padding: --spacing(1) --spacing(1) --spacing(1) --spacing(5);
+  gap: --spacing(4);
+  min-width: 0;
+  margin-top: --spacing(3);
+  padding: --spacing(1) --spacing(1) --spacing(1) --spacing(6);
   border-radius: 9999px;
   background: var(--hig-surface);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font: 600 var(--text-sm) / 1.5 var(--font-mono);
 }
 
 .install-command > span {
@@ -211,7 +192,9 @@ textarea:focus-visible {
 }
 
 .install-command code {
+  min-width: 0;
   overflow-wrap: anywhere;
+  user-select: all;
 }
 
 .runtime-note {
@@ -305,6 +288,20 @@ textarea:focus-visible {
 
 .copy-feedback[data-error="true"] {
   color: var(--hig-negative);
+}
+
+.install-command .copy-button {
+  margin-left: auto;
+}
+
+/* Keep the live region for screen readers without letting the empty span add a flex gap after the button. */
+.install-command .copy-feedback:not([data-error="true"]) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .metrics {
