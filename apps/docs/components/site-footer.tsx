@@ -3,8 +3,8 @@ import Link from "next/link";
 
 const links = [
   { label: "Documentation", href: "/docs/" },
-  { label: "GitHub", href: "https://github.com/bloxwap/hyperevm" },
-  { label: "npm", href: "https://www.npmjs.com/package/@bloxwap/hyperevm" },
+  { label: "GitHub", href: "https://github.com/bloxwap/smart-hyperevm" },
+  { label: "npm", href: "https://www.npmjs.com/package/@bloxwap/smart-hyperevm" },
   { label: "Bloxwap", href: "https://bloxwap.com" },
 ];
 

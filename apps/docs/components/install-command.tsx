@@ -4,10 +4,10 @@ import { Tabs } from "@bloxwap/hig-react/navigation";
 import { CopyButton } from "./copy-button";
 
 const installers = [
-  { name: "bun", command: "bun add @bloxwap/hyperevm" },
-  { name: "npm", command: "npm install @bloxwap/hyperevm" },
-  { name: "pnpm", command: "pnpm add @bloxwap/hyperevm" },
-  { name: "yarn", command: "yarn add @bloxwap/hyperevm" },
+  { name: "bun", command: "bun add @bloxwap/smart-hyperevm" },
+  { name: "npm", command: "npm install @bloxwap/smart-hyperevm" },
+  { name: "pnpm", command: "pnpm add @bloxwap/smart-hyperevm" },
+  { name: "yarn", command: "yarn add @bloxwap/smart-hyperevm" },
 ];
 
 /** HIG Tabs own the package-manager selection (roving focus, arrow/Home/End keys, tab/panel wiring). */

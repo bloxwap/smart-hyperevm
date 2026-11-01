@@ -1,11 +1,11 @@
 <p align="center">
   <strong>Latency-aware typescript
-    <a href="https://github.com/bloxwap/hyperevm">HyperEVM RPC transport</a></strong>
+    <a href="https://github.com/bloxwap/smart-hyperevm">HyperEVM RPC transport</a></strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/bloxwap/hyperevm/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/bloxwap/hyperevm?style=flat-square"></a>
-  <a href="https://www.npmjs.com/package/@bloxwap/hyperevm"><img alt="npm" src="https://img.shields.io/npm/v/@bloxwap/hyperevm?style=flat-square"></a>
+  <a href="https://github.com/bloxwap/smart-hyperevm/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/bloxwap/smart-hyperevm?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/@bloxwap/smart-hyperevm"><img alt="npm" src="https://img.shields.io/npm/v/@bloxwap/smart-hyperevm?style=flat-square"></a>
 </p>
 
 ## Features
@@ -34,36 +34,36 @@ One live HyperEVM run compared `hyperevm()` defaults with direct viem `http()` c
 | dRPC (direct)               |                218 ms |                 223 ms |                  224 ms |                        20% / 20% |
 | Stakely (direct)            |              2,104 ms |               2,318 ms |                1,482 ms |                          0% / 1% |
 
-Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](https://bloxwap.github.io/hyperevm/docs/benchmarks/#direct-provider-comparison).
+Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](https://bloxwap.github.io/smart-hyperevm/docs/benchmarks/#direct-provider-comparison).
 
 ## Documentation
 
-Browse the [full documentation](https://bloxwap.github.io/hyperevm/docs/) for configuration, routing, caching, telemetry, and benchmarks.
+Browse the [full documentation](https://bloxwap.github.io/smart-hyperevm/docs/) for configuration, routing, caching, telemetry, and benchmarks.
 
 ## Installation
 
 ### Bun
 
 ```sh
-bun add @bloxwap/hyperevm
+bun add @bloxwap/smart-hyperevm
 ```
 
 ### Node.js 22.12+
 
 ```sh
-npm i @bloxwap/hyperevm
+npm i @bloxwap/smart-hyperevm
 ```
 
 ### pnpm
 
 ```sh
-pnpm add @bloxwap/hyperevm
+pnpm add @bloxwap/smart-hyperevm
 ```
 
 ### Yarn
 
 ```sh
-yarn add @bloxwap/hyperevm
+yarn add @bloxwap/smart-hyperevm
 ```
 
 ## Quick Example
@@ -74,7 +74,7 @@ yarn add @bloxwap/hyperevm
 // 1. Import module
 import { createPublicClient } from "viem";
 import { hyperEvm } from "viem/chains";
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 // 2. Set up client with transport
 const client = createPublicClient({
@@ -91,7 +91,7 @@ const block = await client.getBlockNumber();
 ```ts
 // 1. Import modules
 import { http } from "viem";
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 // 2. Set up transport with your endpoints
 const transport = hyperevm({
@@ -109,7 +109,7 @@ Hedging is off unless you set `hedge`. When it is on, a slow idempotent read is 
 Use explicit, trusted endpoints in services and create the transport once per process or Worker isolate.
 
 ```ts
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 const transport = hyperevm({
   endpoints: [
@@ -127,7 +127,7 @@ const transport = hyperevm({
 - Set endpoint `rps` and `burst` values to stay within provider rate limits.
 - Call `transport.value.close()` on shutdown to stop timers and save persisted scores.
 
-See [all options and defaults](https://bloxwap.github.io/hyperevm/docs/routing/#combining-the-router-features).
+See [all options and defaults](https://bloxwap.github.io/smart-hyperevm/docs/routing/#combining-the-router-features).
 
 ### Observe
 

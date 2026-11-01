@@ -17,7 +17,7 @@ export function baseOptions(): BaseLayoutProps {
         </span>
       ),
     },
-    githubUrl: "https://github.com/bloxwap/hyperevm",
+    githubUrl: "https://github.com/bloxwap/smart-hyperevm",
     themeSwitch: { enabled: false },
   };
 }

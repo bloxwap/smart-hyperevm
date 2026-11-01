@@ -44,11 +44,11 @@ jobs:
           body: |
             Weekly probe of the public HyperEVM registry.
 
-            The ranker merges the current upstream lists with community submissions, probes each HTTP endpoint, and rewrites `packages/hyperevm/registry/nodes.json` and `packages/hyperevm/registry/history.json`. Nodes without three successful probes spread across two weeks stay on the new-node weight cap.
+            The ranker merges the current upstream lists with community submissions, probes each HTTP endpoint, and rewrites `packages/smart-hyperevm/registry/nodes.json` and `packages/smart-hyperevm/registry/history.json`. Nodes without three successful probes spread across two weeks stay on the new-node weight cap.
 
             This pull request was opened by `.github/workflows/rank-registry.yml`. It does not push to `main`.
           branch: registry/rankings
           add-paths: |
-            packages/hyperevm/registry/nodes.json
-            packages/hyperevm/registry/history.json
+            packages/smart-hyperevm/registry/nodes.json
+            packages/smart-hyperevm/registry/history.json
           delete-branch: true

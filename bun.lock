@@ -3,14 +3,14 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@bloxwap/hyperevm-workspace",
+      "name": "@bloxwap/smart-hyperevm-workspace",
       "devDependencies": {
         "@biomejs/biome": "2.6.3",
         "turbo": "2.11.10",
       },
     },
     "apps/docs": {
-      "name": "@bloxwap/hyperevm-docs",
+      "name": "@bloxwap/smart-hyperevm-docs",
       "dependencies": {
         "@bloxwap/font": "0.1.2",
         "@bloxwap/hig-react": "0.1.0",
@@ -35,8 +35,8 @@
         "typescript": "5.9.3",
       },
     },
-    "packages/hyperevm": {
-      "name": "@bloxwap/hyperevm",
+    "packages/smart-hyperevm": {
+      "name": "@bloxwap/smart-hyperevm",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "1.4.3",
@@ -83,9 +83,9 @@
 
     "@bloxwap/hig-tokens": ["@bloxwap/hig-tokens@0.1.0", "", {}, "sha512-udpntFJd+V056S9CtBYQWFKY++me1h7fTTXfwq+ivyfDIveZrUW4tE10fghAtmDPz2m6jzOzMRCm/Cg5lw09GA=="],
 
-    "@bloxwap/hyperevm": ["@bloxwap/hyperevm@workspace:packages/hyperevm"],
+    "@bloxwap/smart-hyperevm": ["@bloxwap/smart-hyperevm@workspace:packages/smart-hyperevm"],
 
-    "@bloxwap/hyperevm-docs": ["@bloxwap/hyperevm-docs@workspace:apps/docs"],
+    "@bloxwap/smart-hyperevm-docs": ["@bloxwap/smart-hyperevm-docs@workspace:apps/docs"],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
 

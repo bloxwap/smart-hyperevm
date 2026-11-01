@@ -4,4 +4,4 @@ linker = "isolated"
 minimumReleaseAge = 259200
 
 [test]
-coveragePathIgnorePatterns = ["packages/hyperevm/tests/**", "packages/hyperevm/.dev/**"]
+coveragePathIgnorePatterns = ["packages/smart-hyperevm/tests/**", "packages/smart-hyperevm/.dev/**"]

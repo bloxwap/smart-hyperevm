@@ -12,7 +12,7 @@ Test suite for the transport, run with `bun test`.
 
 ## Running
 
-Run these commands from `packages/hyperevm/`. The workspace root also provides `bun run test`.
+Run these commands from `packages/smart-hyperevm/`. The workspace root also provides `bun run test`.
 
 ```sh
 bun test tests/

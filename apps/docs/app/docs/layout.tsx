@@ -12,7 +12,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       sidebar={{
         footer: (
           <div className="docs-sidebar-footer">
-            <a href="https://www.npmjs.com/package/@bloxwap/hyperevm" className="docs-app-link">
+            <a href="https://www.npmjs.com/package/@bloxwap/smart-hyperevm" className="docs-app-link">
               View on npm <ArrowUpRight size={16} aria-hidden />
             </a>
           </div>

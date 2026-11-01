@@ -517,7 +517,7 @@ function sharedKey(timeout: number, retryCount: number, chain: Chain | undefined
  * ```ts
  * import { createPublicClient } from "viem";
  * import { hyperEvm } from "viem/chains";
- * import { hyperevm } from "@bloxwap/hyperevm";
+ * import { hyperevm } from "@bloxwap/smart-hyperevm";
  *
  * const client = createPublicClient({
  *   chain: hyperEvm,

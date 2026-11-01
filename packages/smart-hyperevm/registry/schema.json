@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/bloxwap/hyperevm/blob/main/registry/schema.json",
+  "$id": "https://github.com/bloxwap/smart-hyperevm/blob/main/packages/smart-hyperevm/registry/schema.json",
   "title": "HyperEVM public RPC registry",
   "type": "object",
   "additionalProperties": false,

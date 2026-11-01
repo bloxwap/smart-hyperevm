@@ -501,7 +501,7 @@ textarea:focus-visible {
   color: var(--hig-action);
 }
 
-#nd-sidebar div:has(> a[href="https://github.com/bloxwap/hyperevm"]) {
+#nd-sidebar div:has(> a[href="https://github.com/bloxwap/smart-hyperevm"]) {
   border: 0;
   background: none;
 }

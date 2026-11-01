@@ -1,5 +1,5 @@
 {
-  "name": "@bloxwap/hyperevm-workspace",
+  "name": "@bloxwap/smart-hyperevm-workspace",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -14,18 +14,18 @@
     "check:format": "biome format .",
     "check:lint": "biome lint .",
     "check:docs": "cd apps/docs && bun run check",
-    "check:sdk": "cd packages/hyperevm && bun run typecheck",
+    "check:sdk": "cd packages/smart-hyperevm && bun run typecheck",
     "format": "biome format --write .",
     "lint": "biome lint --write .",
     "typecheck": "bun run check:sdk",
-    "test": "cd packages/hyperevm && bun run test",
-    "build": "cd packages/hyperevm && bun run build",
-    "docs:dev": "turbo run dev --filter=@bloxwap/hyperevm-docs",
+    "test": "cd packages/smart-hyperevm && bun run test",
+    "build": "cd packages/smart-hyperevm && bun run build",
+    "docs:dev": "turbo run dev --filter=@bloxwap/smart-hyperevm-docs",
     "docs:build": "cd apps/docs && bun run build",
     "docs:check": "cd apps/docs && bun run check",
-    "rank": "cd packages/hyperevm && bun run rank",
-    "bench": "cd packages/hyperevm && bun run bench",
-    "bench:live": "cd packages/hyperevm && bun run bench:live"
+    "rank": "cd packages/smart-hyperevm && bun run rank",
+    "bench": "cd packages/smart-hyperevm && bun run bench",
+    "bench:live": "cd packages/smart-hyperevm && bun run bench:live"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",

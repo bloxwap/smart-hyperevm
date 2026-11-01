@@ -2,7 +2,7 @@
 
 Issues and small fixes are welcome. Please open an issue before starting a large change.
 
-`@bloxwap/hyperevm` is published to npm. A release needs Joe's approval: bump `version` in `packages/hyperevm/package.json`, then run `npm publish` from `packages/hyperevm`. `prepublishOnly` typechecks, tests, and builds `dist/` (ESM bundles plus declarations) first. Tag the release commit `vX.Y.Z`.
+`@bloxwap/smart-hyperevm` is published to npm. A release needs Joe's approval: bump `version` in `packages/smart-hyperevm/package.json`, then run `npm publish` from `packages/smart-hyperevm`. `prepublishOnly` typechecks, tests, and builds `dist/` (ESM bundles plus declarations) first. Tag the release commit `vX.Y.Z`.
 
 ## Development
 
@@ -19,7 +19,7 @@ bun run build
 
 ## Submitting a public RPC endpoint
 
-The default transport reads [`packages/hyperevm/registry/nodes.json`](packages/hyperevm/registry/nodes.json). Add a node by pull request. The weekly rank workflow probes what you added and opens a follow-up PR with weights. It does not push to `main`.
+The default transport reads [`packages/smart-hyperevm/registry/nodes.json`](packages/smart-hyperevm/registry/nodes.json). Add a node by pull request. The weekly rank workflow probes what you added and opens a follow-up PR with weights. It does not push to `main`.
 
 One endpoint per pull request is easiest to review.
 

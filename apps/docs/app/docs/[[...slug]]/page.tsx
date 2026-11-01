@@ -21,7 +21,7 @@ export default async function Page({ params }: PageProps) {
       </DocsBody>
       <a
         className="edit-link"
-        href={`https://github.com/bloxwap/hyperevm/edit/main/apps/docs/content/docs/${page.path}`}
+        href={`https://github.com/bloxwap/smart-hyperevm/edit/main/apps/docs/content/docs/${page.path}`}
       >
         Edit this page on GitHub <ArrowUpRight size={14} aria-hidden />
       </a>

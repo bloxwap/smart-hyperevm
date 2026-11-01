@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://bloxwap.github.io/hyperevm/sitemap.xml
+Sitemap: https://bloxwap.github.io/smart-hyperevm/sitemap.xml

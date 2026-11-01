@@ -5,7 +5,7 @@ import { mono, sans } from "@/lib/fonts";
 import "./global.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://bloxwap.github.io/hyperevm/"),
+  metadataBase: new URL("https://bloxwap.github.io/smart-hyperevm/"),
   title: { default: "HyperEVM RPC · Bloxwap", template: "%s · HyperEVM RPC" },
   description: "A latency-aware, cached, multi-endpoint HyperEVM RPC transport for viem.",
   icons: { icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/logos/bloxwap-icon-green.svg` },

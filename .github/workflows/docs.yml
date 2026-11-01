@@ -6,7 +6,7 @@ on:
     paths:
       - "README.md"
       - "apps/docs/**"
-      - "packages/hyperevm/README.md"
+      - "packages/smart-hyperevm/README.md"
       - ".github/workflows/docs.yml"
       - "package.json"
       - "bun.lock"
@@ -15,7 +15,7 @@ on:
     paths:
       - "README.md"
       - "apps/docs/**"
-      - "packages/hyperevm/README.md"
+      - "packages/smart-hyperevm/README.md"
       - ".github/workflows/docs.yml"
       - "package.json"
       - "bun.lock"

@@ -1,6 +1,6 @@
 /**
  * Build the published package: an ESM bundle per public entry in dist/, sharing chunks so every entry sees
- * the same classes (an error thrown by the transport is `instanceof` the one `@bloxwap/hyperevm` exports),
+ * the same classes (an error thrown by the transport is `instanceof` the one `@bloxwap/smart-hyperevm` exports),
  * and declarations in dist/types. Declarations keep the sources' `.ts` specifiers, so they are rewritten to
  * `.js`, which TypeScript resolves to the `.d.ts` beside it.
  * @module

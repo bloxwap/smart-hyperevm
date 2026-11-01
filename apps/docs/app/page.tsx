@@ -30,7 +30,7 @@ const features = [
 
 const snippet = `import { createPublicClient } from "viem";
 import { hyperEvm } from "viem/chains";
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 const client = createPublicClient({
   chain: hyperEvm,

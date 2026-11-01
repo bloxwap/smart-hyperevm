@@ -85,7 +85,7 @@ Hedge stays off. The production `minDelay` is 250ms, and the seeded registry inc
 
 ## Live registry
 
-`bun run bench:live` sends two rounds of the six reads above through `hyperevm()` and through viem `fallback` over the eligible HTTP rows in `packages/hyperevm/registry/nodes.json`. Each attempt times out at 4 seconds. The script prints JSON and, when `BENCH_OUT` is set, writes that file.
+`bun run bench:live` sends two rounds of the six reads above through `hyperevm()` and through viem `fallback` over the eligible HTTP rows in `packages/smart-hyperevm/registry/nodes.json`. Each attempt times out at 4 seconds. The script prints JSON and, when `BENCH_OUT` is set, writes that file.
 
 GitHub Actions runs it only from the manual **Benchmark** workflow (`.github/workflows/benchmark.yml`) and uploads the JSON. It does not run on pull requests, and it does not change the registry.
 

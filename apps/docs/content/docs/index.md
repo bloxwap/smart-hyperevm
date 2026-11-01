@@ -6,12 +6,12 @@ description: Install and use the Bloxwap HyperEVM RPC transport with viem.
 
 # HyperEVM RPC
 
-`@bloxwap/hyperevm` is a drop-in viem transport for HyperEVM. It ranks RPC endpoints using live latency, errors, congestion, and block-head lag, then races the best candidates. Recent reads can be answered from a local cache.
+`@bloxwap/smart-hyperevm` is a drop-in viem transport for HyperEVM. It ranks RPC endpoints using live latency, errors, congestion, and block-head lag, then races the best candidates. Recent reads can be answered from a local cache.
 
 ## Install
 
 ```sh
-bun add @bloxwap/hyperevm
+bun add @bloxwap/smart-hyperevm
 ```
 
 npm, pnpm, and Yarn work too. Node.js 22.12 or later is required. `viem` is the only peer dependency; the package has no runtime dependencies of its own.
@@ -21,7 +21,7 @@ npm, pnpm, and Yarn work too. Node.js 22.12 or later is required. `viem` is the 
 ```ts
 import { createPublicClient } from "viem";
 import { hyperEvm } from "viem/chains";
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 const client = createPublicClient({
   chain: hyperEvm,

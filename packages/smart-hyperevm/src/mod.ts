@@ -5,14 +5,14 @@
  * shipped registry helpers.
  *
  * Tree-shakeable imports:
- * - `@bloxwap/hyperevm/transport`
- * - `@bloxwap/hyperevm/registry`
+ * - `@bloxwap/smart-hyperevm/transport`
+ * - `@bloxwap/smart-hyperevm/registry`
  *
  * @example Quick start
  * ```ts
  * import { createPublicClient } from "viem";
  * import { hyperEvm } from "viem/chains";
- * import { hyperevm } from "@bloxwap/hyperevm";
+ * import { hyperevm } from "@bloxwap/smart-hyperevm";
  *
  * const client = createPublicClient({
  *   chain: hyperEvm,

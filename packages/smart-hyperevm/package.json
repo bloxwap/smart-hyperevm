@@ -1,5 +1,5 @@
 {
-  "name": "@bloxwap/hyperevm",
+  "name": "@bloxwap/smart-hyperevm",
   "version": "0.1.0",
   "description": "Performance-optimized, load-balanced RPC transport for HyperEVM. A drop-in upgrade over viem's fallback transport.",
   "license": "MIT",
@@ -18,14 +18,14 @@
     "evm",
     "typescript"
   ],
-  "homepage": "https://github.com/bloxwap/hyperevm#readme",
+  "homepage": "https://github.com/bloxwap/smart-hyperevm#readme",
   "bugs": {
-    "url": "https://github.com/bloxwap/hyperevm/issues"
+    "url": "https://github.com/bloxwap/smart-hyperevm/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bloxwap/hyperevm.git",
-    "directory": "packages/hyperevm"
+    "url": "git+https://github.com/bloxwap/smart-hyperevm.git",
+    "directory": "packages/smart-hyperevm"
   },
   "engines": {
     "node": ">=22.12.0"

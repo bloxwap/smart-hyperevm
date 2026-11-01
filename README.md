@@ -3,8 +3,8 @@
 <p align="center"><strong>Latency-aware JSON-RPC transport for HyperEVM. A viem <code>Transport</code> that ranks endpoints from the calls your process already made.</strong></p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/bloxwap/hyperevm?style=flat-square"></a>
-  <a href="https://www.npmjs.com/package/@bloxwap/hyperevm"><img alt="npm" src="https://img.shields.io/npm/v/@bloxwap/hyperevm?style=flat-square"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/bloxwap/smart-hyperevm?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/@bloxwap/smart-hyperevm"><img alt="npm" src="https://img.shields.io/npm/v/@bloxwap/smart-hyperevm?style=flat-square"></a>
 </p>
 
 ## Features
@@ -33,32 +33,32 @@ One live HyperEVM run compared `hyperevm()` defaults with direct viem `http()` c
 | dRPC (direct)               |                218 ms |                 223 ms |                  224 ms |                        20% / 20% |
 | Stakely (direct)            |              2,104 ms |               2,318 ms |                1,482 ms |                          0% / 1% |
 
-Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](https://bloxwap.github.io/hyperevm/docs/benchmarks/#direct-provider-comparison).
+Warm columns exclude the first iteration; direct providers do not cache. Cold reads still require the network, and the concurrent phase started with a warm `hyperevm()` cache. Cached answers can be one block behind by default, and background refreshes increase upstream traffic. See the [full benchmark methodology and results](https://bloxwap.github.io/smart-hyperevm/docs/benchmarks/#direct-provider-comparison).
 
 ## Installation
 
 ### Bun
 
 ```sh
-bun add @bloxwap/hyperevm
+bun add @bloxwap/smart-hyperevm
 ```
 
 ### Node.js 22.12+
 
 ```sh
-npm i @bloxwap/hyperevm
+npm i @bloxwap/smart-hyperevm
 ```
 
 ### pnpm
 
 ```sh
-pnpm add @bloxwap/hyperevm
+pnpm add @bloxwap/smart-hyperevm
 ```
 
 ### Yarn
 
 ```sh
-yarn add @bloxwap/hyperevm
+yarn add @bloxwap/smart-hyperevm
 ```
 
 ## Release status
@@ -72,7 +72,7 @@ yarn add @bloxwap/hyperevm
 ```ts
 import { createPublicClient } from "viem";
 import { hyperEvm } from "viem/chains";
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 const client = createPublicClient({
   chain: hyperEvm,
@@ -82,13 +82,13 @@ const client = createPublicClient({
 const block = await client.getBlockNumber();
 ```
 
-With no arguments, `hyperevm()` calls the eligible HTTP rows in [`packages/hyperevm/registry/nodes.json`](packages/hyperevm/registry/nodes.json). HyperEVM mainnet is chain id 999.
+With no arguments, `hyperevm()` calls the eligible HTTP rows in [`packages/smart-hyperevm/registry/nodes.json`](packages/smart-hyperevm/registry/nodes.json). HyperEVM mainnet is chain id 999.
 
 ### Configure
 
 ```ts
 import { http } from "viem";
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 const transport = hyperevm({
   endpoints: ["https://rpc.hyperliquid.xyz/evm", http("https://rpc.hypurrscan.io", { batch: true })],
@@ -107,7 +107,7 @@ Before an endpoint serves its first call, the transport checks `eth_chainId` aga
 Use explicit, trusted endpoints in services and create the transport once per process or Worker isolate.
 
 ```ts
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 const transport = hyperevm({
   endpoints: [
@@ -139,7 +139,7 @@ Use `onEvent` for telemetry and `transport.value.snapshot()` for current routing
 
 ## Documentation
 
-Browse the [full documentation](https://bloxwap.github.io/hyperevm/docs/) for configuration, routing, caching, telemetry, and benchmarks. Public endpoint submissions are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
+Browse the [full documentation](https://bloxwap.github.io/smart-hyperevm/docs/) for configuration, routing, caching, telemetry, and benchmarks. Public endpoint submissions are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
 

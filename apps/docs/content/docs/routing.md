@@ -6,7 +6,7 @@ description: Detailed transport scoring, failover, request coalescing, caching, 
 
 # Routing and caching
 
-`@bloxwap/hyperevm` has two rankers. They answer different questions.
+`@bloxwap/smart-hyperevm` has two rankers. They answer different questions.
 
 The **transport** ranks endpoints from the calls your process is making right now. The **registry ranker** (`bun run rank`) decides which public URLs are worth putting in that pool, and at what weight, from a rolling window of probes. A fast sample on a brand-new URL cannot take the pool over.
 
@@ -192,7 +192,7 @@ Racing, pinning, coalescing, budgets, warm start, the activity pause, and the re
 
 ## Registry score
 
-`packages/hyperevm/.dev/rank.ts` fetches the source lists, merges them with `packages/hyperevm/registry/nodes.json`, probes every HTTP URL, appends the observations to `packages/hyperevm/registry/history.json`, and writes ranks back. The workflow `.github/workflows/rank-registry.yml` runs that weekly and on demand, then opens a pull request. It does not push to `main`.
+`packages/smart-hyperevm/.dev/rank.ts` fetches the source lists, merges them with `packages/smart-hyperevm/registry/nodes.json`, probes every HTTP URL, appends the observations to `packages/smart-hyperevm/registry/history.json`, and writes ranks back. The workflow `.github/workflows/rank-registry.yml` runs that weekly and on demand, then opens a pull request. It does not push to `main`.
 
 A probe is `eth_chainId`, `eth_blockNumber`, `eth_call` to the zero address, `eth_getLogs` for a single block filtered to an address that should have no logs, a HyperCore read precompile call, and `eth_getLogs` over a realistic range. The chain id must be 999. A higher head from a node on the wrong chain is ignored.
 
@@ -211,7 +211,7 @@ Inside the window (28 days):
 
 WebSocket URLs are stored and are not part of the default HTTP pool. The transport will use a `wss://` URL when you pass it yourself.
 
-Community submissions (see [CONTRIBUTING.md](https://github.com/bloxwap/hyperevm/blob/main/CONTRIBUTING.md)) stay in the file when upstream lists stop mentioning them. An upstream URL that disappears from every source is removed on the next successful run.
+Community submissions (see [CONTRIBUTING.md](https://github.com/bloxwap/smart-hyperevm/blob/main/CONTRIBUTING.md)) stay in the file when upstream lists stop mentioning them. An upstream URL that disappears from every source is removed on the next successful run.
 
 If a source list fails to download, the script exits and does not write. If a registry that already had eligible endpoints gets a run where nobody returns chain id 999, or a ranking that leaves no endpoint eligible (for example when every HyperCore read probe fails at once), the script also refuses to write. One bad network day must not empty the pool.
 

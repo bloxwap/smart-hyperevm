@@ -12,7 +12,7 @@ Pass public URLs, keyed provider URLs, or existing viem transports:
 
 ```ts
 import { http } from "viem";
-import { hyperevm } from "@bloxwap/hyperevm";
+import { hyperevm } from "@bloxwap/smart-hyperevm";
 
 const transport = hyperevm({
   endpoints: [

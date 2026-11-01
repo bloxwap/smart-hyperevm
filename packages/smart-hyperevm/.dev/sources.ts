@@ -41,7 +41,7 @@ export async function fetchText(url: string, fetchImpl: typeof fetch = fetch): P
   const response = await fetchImpl(url, {
     headers: {
       accept: "*/*",
-      "user-agent": "@bloxwap/hyperevm rank-registry",
+      "user-agent": "@bloxwap/smart-hyperevm rank-registry",
     },
     signal: AbortSignal.timeout(20_000),
   });
