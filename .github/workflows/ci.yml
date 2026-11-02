@@ -1,9 +1,5 @@
 name: CI
 
-# GitHub-hosted ubuntu-latest, not the org's self-hosted macOS pool. This
-# repository does not have that runner label wired up, and these checks only
-# need Bun.
-
 on:
   pull_request:
   push:
@@ -19,7 +15,8 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
