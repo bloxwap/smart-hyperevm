@@ -1,7 +1,7 @@
 {
   "version": 1,
   "chainId": 999,
-  "updatedAt": "2026-10-31T16:46:51.848Z",
+  "updatedAt": "2026-11-02T23:37:03.343Z",
   "policy": {
     "windowMs": 2419200000,
     "minObservations": 3,
@@ -12,6 +12,32 @@
     "maxNewNodeShare": 0.25
   },
   "endpoints": [
+    {
+      "url": "https://rpc.purroofgroup.com/",
+      "kind": "http",
+      "tracking": "unknown",
+      "sources": [
+        {
+          "name": "openchainbench",
+          "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
+        }
+      ],
+      "submission": "upstream",
+      "addedAt": "2026-10-30T22:24:03.908Z",
+      "eligible": true,
+      "weight": 0.15,
+      "rank": 1,
+      "stats": {
+        "observations": 3,
+        "successes": 3,
+        "uptime": 1,
+        "latencyMs": 114.5,
+        "tailMs": 192.6,
+        "medianLag": 0,
+        "established": false,
+        "precompileOk": true
+      }
+    },
     {
       "url": "https://rpc.hypurrscan.io/",
       "kind": "http",
@@ -34,112 +60,14 @@
       "addedAt": "2026-10-30T22:24:03.908Z",
       "eligible": true,
       "weight": 0.15,
-      "rank": 1,
-      "stats": {
-        "observations": 2,
-        "successes": 2,
-        "uptime": 1,
-        "latencyMs": 505.4,
-        "tailMs": 586.9,
-        "medianLag": 0.5,
-        "established": false,
-        "precompileOk": true
-      }
-    },
-    {
-      "url": "https://rpc.hyperliquid.xyz/evm",
-      "kind": "http",
-      "tracking": "unknown",
-      "sources": [
-        {
-          "name": "chainlist",
-          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
-        },
-        {
-          "name": "chainindex",
-          "url": "https://www.chainindex.dev/chains/hyperevm"
-        },
-        {
-          "name": "openchainbench",
-          "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
-        },
-        {
-          "name": "hyperliquid-docs",
-          "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm"
-        }
-      ],
-      "submission": "upstream",
-      "addedAt": "2026-10-30T22:24:03.908Z",
-      "eligible": true,
-      "weight": 0.15,
       "rank": 2,
       "stats": {
-        "observations": 2,
-        "successes": 1,
-        "uptime": 0.5,
-        "latencyMs": 181,
-        "tailMs": 238.4,
-        "medianLag": 0.5,
-        "established": false,
-        "precompileOk": true
-      }
-    },
-    {
-      "url": "https://hyperliquid.drpc.org/",
-      "kind": "http",
-      "tracking": "unknown",
-      "sources": [
-        {
-          "name": "chainlist",
-          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
-        },
-        {
-          "name": "chainindex",
-          "url": "https://www.chainindex.dev/chains/hyperevm"
-        },
-        {
-          "name": "openchainbench",
-          "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
-        }
-      ],
-      "submission": "upstream",
-      "addedAt": "2026-10-30T22:24:03.908Z",
-      "eligible": true,
-      "weight": 0.15,
-      "rank": 3,
-      "stats": {
-        "observations": 2,
-        "successes": 1,
-        "uptime": 0.5,
-        "latencyMs": 260.4,
-        "tailMs": 267.3,
-        "medianLag": 0.5,
-        "established": false,
-        "precompileOk": true
-      }
-    },
-    {
-      "url": "https://rpc.purroofgroup.com/",
-      "kind": "http",
-      "tracking": "unknown",
-      "sources": [
-        {
-          "name": "openchainbench",
-          "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
-        }
-      ],
-      "submission": "upstream",
-      "addedAt": "2026-10-30T22:24:03.908Z",
-      "eligible": true,
-      "weight": 0.15,
-      "rank": 4,
-      "stats": {
-        "observations": 2,
-        "successes": 2,
+        "observations": 3,
+        "successes": 3,
         "uptime": 1,
-        "latencyMs": 152.8,
-        "tailMs": 192.6,
-        "medianLag": 35.5,
+        "latencyMs": 586.9,
+        "tailMs": 854.1,
+        "medianLag": 0,
         "established": false,
         "precompileOk": true
       }
@@ -166,13 +94,13 @@
       "addedAt": "2026-10-30T22:24:03.908Z",
       "eligible": true,
       "weight": 0.15,
-      "rank": 5,
+      "rank": 3,
       "stats": {
-        "observations": 2,
-        "successes": 2,
+        "observations": 3,
+        "successes": 3,
         "uptime": 1,
-        "latencyMs": 1156.9,
-        "tailMs": 1701.4,
+        "latencyMs": 846.4,
+        "tailMs": 3053.6,
         "medianLag": 10,
         "established": false,
         "precompileOk": true
@@ -198,11 +126,11 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 2,
+        "observations": 3,
         "successes": 1,
-        "uptime": 0.5,
-        "latencyMs": 125.1,
-        "tailMs": 161.5,
+        "uptime": 0.3333,
+        "latencyMs": 161.5,
+        "tailMs": 193.1,
         "medianLag": 1,
         "established": false,
         "precompileOk": false
@@ -228,7 +156,7 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 2,
+        "observations": 3,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
@@ -236,6 +164,40 @@
         "medianLag": null,
         "established": false,
         "precompileOk": null
+      }
+    },
+    {
+      "url": "https://hyperliquid.drpc.org/",
+      "kind": "http",
+      "tracking": "unknown",
+      "sources": [
+        {
+          "name": "chainlist",
+          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
+        },
+        {
+          "name": "chainindex",
+          "url": "https://www.chainindex.dev/chains/hyperevm"
+        },
+        {
+          "name": "openchainbench",
+          "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
+        }
+      ],
+      "submission": "upstream",
+      "addedAt": "2026-10-30T22:24:03.908Z",
+      "eligible": false,
+      "weight": 0,
+      "rank": null,
+      "stats": {
+        "observations": 3,
+        "successes": 1,
+        "uptime": 0.3333,
+        "latencyMs": 267.3,
+        "tailMs": 308.5,
+        "medianLag": 0,
+        "established": false,
+        "precompileOk": true
       }
     },
     {
@@ -258,7 +220,7 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 2,
+        "observations": 3,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
@@ -284,7 +246,7 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 2,
+        "observations": 3,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
@@ -314,14 +276,52 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 2,
+        "observations": 3,
         "successes": 1,
-        "uptime": 0.5,
-        "latencyMs": 1496.3,
+        "uptime": 0.3333,
+        "latencyMs": 1156.7,
         "tailMs": 1496.3,
-        "medianLag": 0.5,
+        "medianLag": 1,
         "established": false,
         "precompileOk": false
+      }
+    },
+    {
+      "url": "https://rpc.hyperliquid.xyz/evm",
+      "kind": "http",
+      "tracking": "unknown",
+      "sources": [
+        {
+          "name": "chainlist",
+          "url": "https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/additionalChainRegistry/chainid-999.js"
+        },
+        {
+          "name": "chainindex",
+          "url": "https://www.chainindex.dev/chains/hyperevm"
+        },
+        {
+          "name": "openchainbench",
+          "url": "https://openchainbench.com/benchmarks/hyperliquid-rpc"
+        },
+        {
+          "name": "hyperliquid-docs",
+          "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm"
+        }
+      ],
+      "submission": "upstream",
+      "addedAt": "2026-10-30T22:24:03.908Z",
+      "eligible": false,
+      "weight": 0,
+      "rank": null,
+      "stats": {
+        "observations": 3,
+        "successes": 1,
+        "uptime": 0.3333,
+        "latencyMs": 176.8,
+        "tailMs": 245.4,
+        "medianLag": 0,
+        "established": false,
+        "precompileOk": true
       }
     },
     {
@@ -344,7 +344,7 @@
       "weight": 0,
       "rank": null,
       "stats": {
-        "observations": 2,
+        "observations": 3,
         "successes": 0,
         "uptime": 0,
         "latencyMs": null,
