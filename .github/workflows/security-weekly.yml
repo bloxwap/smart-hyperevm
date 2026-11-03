@@ -4,7 +4,7 @@ name: security-weekly
 
 on:
   schedule:
-    - cron: "15 3 * * 6"   # Saturdays 3:15 AM Pacific, staggered across repos after the nightlies
+    - cron: "15 3 * * 6" # Saturdays 3:15 AM Pacific, staggered across repos after the nightlies
       timezone: "America/Los_Angeles"
   workflow_dispatch:
   pull_request:
@@ -34,4 +34,4 @@ jobs:
       semgrep: true
       semgrep-config: p/default
     secrets:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_SECURITY_WEBHOOK_URL }}  # optional; without it Slack is skipped
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_SECURITY_WEBHOOK_URL }} # optional; without it Slack is skipped
