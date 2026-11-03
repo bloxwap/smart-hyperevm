@@ -1,0 +1,47 @@
+# Nightly security scan. Shared logic: bloxwap/.github/.github/workflows/security-scan.yml
+name: security-nightly
+
+on:
+  schedule:
+    - cron: "51 2 * * 1-6"   # Mon-Sat 2:51 AM Pacific: incremental secrets window
+      timezone: "America/Los_Angeles"
+    - cron: "51 2 * * 0"     # Sunday 2:51 AM Pacific: full git history for gitleaks
+      timezone: "America/Los_Angeles"
+  workflow_dispatch:
+    inputs:
+      secrets-mode:
+        type: choice
+        options: [incremental, full]
+        default: full
+  # Re-run the full scan (enforced) when the scan setup or its ignore lists change.
+  pull_request:
+    paths:
+      - .github/workflows/security-nightly.yml
+      - .github/workflows/**        # enforced workflow lint runs on workflow changes
+      - .github/actions/**
+      - osv-scanner.toml
+      - .gitleaksignore
+      - .gitleaks.toml
+
+permissions: {}
+
+concurrency:
+  group: security-nightly-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    # Fork guard: never run fork PR code on self-hosted minis
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: bloxwap/.github/.github/workflows/security-scan.yml@2a70724cd0d803abef5f5a7c64c46065f4fda19b # v1.1.0
+    permissions:
+      contents: read
+    with:
+      runs-on: '["self-hosted","macOS","ARM64"]'
+      profile: nightly
+      enforce-workflow-lint: true   # actionlint + zizmor (medium+) must pass; clean as of 2026-10-26
+      secrets-mode: ${{ inputs.secrets-mode || (github.event.schedule == '51 2 * * 0' && 'full' || 'incremental') }}
+      upload-sarif: false     # no GHAS code scanning
+      upload-secret-report: false
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_SECURITY_WEBHOOK_URL }}  # optional; without it Slack is skipped

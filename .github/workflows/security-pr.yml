@@ -1,0 +1,23 @@
+# Runs ALONGSIDE build/test. Nothing in the deploy workflows needs: this.
+name: security-pr
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: security-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true    # a new push to the same PR cancels the stale scan and frees the runner
+
+jobs:
+  gate:
+    # Fork guard: never run fork PR code on self-hosted minis
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: bloxwap/.github/.github/workflows/security-pr-gate.yml@2a70724cd0d803abef5f5a7c64c46065f4fda19b # v1.1.0
+    permissions:
+      contents: read
+    with:
+      runs-on: '["self-hosted","macOS","ARM64"]'
