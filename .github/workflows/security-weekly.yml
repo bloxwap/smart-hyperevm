@@ -1,0 +1,37 @@
+# Weekly SAST (Semgrep, report-only). Shared logic: bloxwap/.github/.github/workflows/security-scan.yml
+# Never fails and never gates a release. Findings go to the job summary; Slack only for High findings.
+name: security-weekly
+
+on:
+  schedule:
+    - cron: "15 3 * * 6" # Saturdays 3:15 AM Pacific, staggered across repos after the nightlies
+      timezone: "America/Los_Angeles"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/security-weekly.yml
+      - .semgrepignore
+
+permissions: {}
+
+concurrency:
+  group: security-weekly-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    # Fork guard: never run fork PR code on self-hosted minis
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: bloxwap/.github/.github/workflows/security-scan.yml@2a70724cd0d803abef5f5a7c64c46065f4fda19b # v1.1.0
+    permissions:
+      contents: read
+    with:
+      runs-on: '["self-hosted","macOS","ARM64"]'
+      profile: nightly
+      deps: false
+      secrets-scan: false
+      workflow-lint: false
+      semgrep: true
+      semgrep-config: p/default
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_SECURITY_WEBHOOK_URL }} # optional; without it Slack is skipped
