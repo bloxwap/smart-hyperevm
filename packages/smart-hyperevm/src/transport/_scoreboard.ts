@@ -63,6 +63,7 @@ export interface ScoreboardOptions {
 /** Picks an endpoint and records what happened after the call. */
 export class Scoreboard {
   readonly #endpoints: EndpointState[];
+  readonly #byId: ReadonlyMap<string, EndpointState>;
   readonly #options: ScoreboardOptions;
   #headRevision = 0;
   #headView: { revision: number; at: number; value: HeadView } | undefined;
@@ -78,6 +79,7 @@ export class Scoreboard {
       global: emptyStat(),
       methods: new Map(),
     }));
+    this.#byId = new Map(this.#endpoints.map((endpoint) => [endpoint.id, endpoint]));
     this.#options = options;
   }
 
@@ -156,7 +158,7 @@ export class Scoreboard {
    * False when the endpoint is unknown or the book already holds samples: live samples always win.
    */
   seed(id: string, method: string, stat: MethodStat, at: number): boolean {
-    const endpoint = this.#endpoints.find((item) => item.id === id);
+    const endpoint = this.#byId.get(id);
     if (!endpoint) return false;
     const book = method === "*" ? endpoint.global : this.#method(endpoint, method);
     if (book.n > 0) return false;
@@ -241,7 +243,7 @@ export class Scoreboard {
   }
 
   #require(id: string): EndpointState {
-    const endpoint = this.#endpoints.find((item) => item.id === id);
+    const endpoint = this.#byId.get(id);
     if (!endpoint) throw new Error(`Unknown HyperEVM endpoint: ${id}`);
     return endpoint;
   }
