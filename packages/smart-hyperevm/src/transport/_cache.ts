@@ -314,6 +314,10 @@ export class ReadCache {
     return this.#config.copyResults ? copy(value) : value;
   }
 
+  #store(value: unknown): { result: unknown; bytes: number } {
+    return this.#config.copyResults ? copyWithSize(value) : { result: value, bytes: sizeOf(value) };
+  }
+
   stats(): CacheStats {
     return {
       hits: this.#hits,
@@ -445,47 +449,51 @@ export class ReadCache {
         const at = plan.method === "eth_getBlockByNumber" ? blockOf(result) : null;
         const stamped = at ?? block ?? this.#source.held(plan.method);
         if (stamped === undefined) return;
+        const stored = this.#store(result);
         this.#set(plan.key, {
           kind: "latest",
-          result: this.#copy(result),
+          result: stored.result,
           block: stamped,
           at: now,
-          bytes: sizeOf(result),
+          bytes: stored.bytes,
         });
         return;
       }
       case "timed": {
         const head = this.#source.head(plan.method)?.block ?? -1;
+        const stored = this.#store(result);
         this.#set(plan.key, {
           kind: "timed",
-          result: this.#copy(result),
+          result: stored.result,
           block: head,
           at: now,
-          bytes: sizeOf(result),
+          bytes: stored.bytes,
         });
         return;
       }
       case "immutable": {
         if (plan.method === "eth_getTransactionByHash" && blockOf(result) === null) return;
         const head = this.#source.head(plan.method)?.block ?? -1;
+        const stored = this.#store(result);
         this.#set(plan.key, {
           kind: "immutable",
-          result: this.#copy(result),
+          result: stored.result,
           block: head,
           at: now,
-          bytes: sizeOf(result),
+          bytes: stored.bytes,
         });
         return;
       }
       case "number": {
         if (plan.block === undefined || plan.exact === undefined) return;
         if (plan.guard && !this.#holdsAll(plan.method, plan.block)) return;
+        const stored = this.#store(result);
         this.#set(plan.exact, {
           kind: "immutable",
-          result: this.#copy(result),
+          result: stored.result,
           block: plan.block,
           at: now,
-          bytes: sizeOf(result),
+          bytes: stored.bytes,
         });
         return;
       }
@@ -826,12 +834,12 @@ function parseLogs(result: readonly unknown[], copyResults: boolean): Log[] | un
     if (!isRecord(item)) return undefined;
     const blockNumber = parseQuantity(item.blockNumber);
     if (blockNumber === null) return undefined;
-    const value = copyResults ? (copy(item) as Record<string, unknown>) : item;
+    const stored = copyResults ? copyWithSize(item) : { result: item, bytes: sizeOf(item) };
     logs.push({
       blockNumber,
       logIndex: parseQuantity(item.logIndex) ?? 0,
-      value,
-      bytes: sizeOf(value),
+      value: stored.result as Record<string, unknown>,
+      bytes: stored.bytes,
     });
   }
   return logs;
@@ -900,6 +908,34 @@ function copy(value: unknown): unknown {
     return out;
   }
   return value;
+}
+
+/** A deep copy and its approximate size, collected in one traversal. */
+function copyWithSize(value: unknown): { result: unknown; bytes: number } {
+  let bytes = 0;
+  const walk = (item: unknown): unknown => {
+    if (typeof item === "string") {
+      bytes += 16 + item.length * 2;
+      return item;
+    }
+    if (Array.isArray(item)) {
+      bytes += 16;
+      return item.map(walk);
+    }
+    if (isRecord(item)) {
+      bytes += 32;
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(item)) {
+        bytes += key.length * 2;
+        out[key] = walk(item[key]);
+      }
+      return out;
+    }
+    bytes += 8;
+    return item;
+  };
+  const result = walk(value);
+  return { result, bytes };
 }
 
 /** Approximate bytes of JSON data in memory: UTF-16 strings plus an allowance per value. */
