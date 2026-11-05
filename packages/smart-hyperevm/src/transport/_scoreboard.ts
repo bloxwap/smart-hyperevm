@@ -352,8 +352,13 @@ export class Scoreboard {
 
   #best(candidates: readonly EndpointState[], method: string): EndpointState | undefined {
     let best: EndpointState | undefined;
+    let bestScore = 0;
     for (const candidate of candidates) {
-      if (!best || this.#better(candidate, best, method) === candidate) best = candidate;
+      const score = this.#score(candidate, method);
+      if (!best || score < bestScore || (!(bestScore < score) && candidate.index <= best.index)) {
+        best = candidate;
+        bestScore = score;
+      }
     }
     return best;
   }
