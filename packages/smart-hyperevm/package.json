@@ -1,6 +1,6 @@
 {
   "name": "@bloxwap/smart-hyperevm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Performance-optimized, load-balanced RPC transport for HyperEVM. A drop-in upgrade over viem's fallback transport.",
   "license": "MIT",
   "type": "module",
