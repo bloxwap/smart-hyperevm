@@ -645,7 +645,8 @@ export class ReadCache {
     let low = from;
     let high = to;
     if (existing && from === existing.to + 1) {
-      merged = existing.logs.concat(ordered);
+      merged = existing.logs;
+      for (const log of ordered) merged.push(log);
       bytes += existing.bytes;
       low = existing.from;
       high = to;
