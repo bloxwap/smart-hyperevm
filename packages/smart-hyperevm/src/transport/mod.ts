@@ -900,10 +900,6 @@ export function smartHyperevm(
       // A race takes the best endpoints in score order, so its lead is never a p2c draw.
       const racing = idempotent && raceRivals > 0 && !background;
       const attempts = retries ? retryCount + 1 : 1;
-      // The availability exception: when every candidate is ejected before the first attempt, that attempt may
-      // still use one. Nothing else is ever dispatched to an endpoint ejected at dispatch time.
-      const opening = board.pick(method, exclude, "best", random);
-      const lastResort = opening !== undefined && breaker.isOpen(opening.id);
       let previous: RankedEndpoint | undefined;
       let round = 0;
       // Time spent waiting out ejections and budget refills together. It never passes MAX_RETRY_BACKOFF_MS.
@@ -911,7 +907,7 @@ export function smartHyperevm(
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         let wait = attempt > 0 ? retryDelay : 0;
         let mode = attempt === 0 && !racing ? routing : "best";
-        let allowEjected = attempt === 0 && lastResort;
+        let allowEjected = false;
         let newRound = false;
         let exhausted: BudgetExhaustedError | undefined;
         let endpoint: RankedEndpoint | undefined;
@@ -951,6 +947,12 @@ export function smartHyperevm(
             exhausted = new BudgetExhaustedError(spent, refillMs);
             // Endpoints that already failed this call may still have budget. Otherwise stop below the limit.
             if (exclude.size === barred.size || newRound) break;
+          }
+          if (attempt === 0 && !allowEjected && !newRound && errors.length === 0 && exclude.size === barred.size) {
+            // The availability exception: when every candidate is ejected before the first attempt, that attempt
+            // may still use one. Defer the extra pick so healthy calls rank their candidates only once.
+            allowEjected = true;
+            continue;
           }
           if (exclude.size > barred.size && !newRound) {
             // Every usable endpoint failed this call, or failed its chain check. Go back to them after a backoff.
