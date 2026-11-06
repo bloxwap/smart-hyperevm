@@ -1,6 +1,6 @@
 "use client";
 
-import { HIGProvider } from "@bloxwap/hig-react/provider";
+import { HIGProvider } from "@bloxwap/hig/react/provider";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { lazy, type ReactNode } from "react";
 

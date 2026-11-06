@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, EmptyState, Skeleton } from "@bloxwap/hig-react/status";
+import { Alert, EmptyState, Skeleton } from "@bloxwap/hig/react/status";
 import { useDocsSearch } from "fumadocs-core/search/client";
 import { staticClient } from "fumadocs-core/search/client/orama-static";
 import {

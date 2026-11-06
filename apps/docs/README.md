@@ -1,6 +1,6 @@
 # HyperEVM documentation
 
-Fumadocs renders the Markdown in `content/docs` as a static Next.js site for GitHub Pages. The interface uses BlockSwap's HIG packages and self-hosted Bloxwap Sans and Mono fonts.
+Fumadocs renders the Markdown in `content/docs` as a static Next.js site for GitHub Pages. The interface uses `@bloxwap/hig` and self-hosted Bloxwap Sans and Mono fonts.
 
 ## Develop
 

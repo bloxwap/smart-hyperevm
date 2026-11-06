@@ -1,6 +1,6 @@
 "use client";
 
-import { Tabs } from "@bloxwap/hig-react/navigation";
+import { Tabs } from "@bloxwap/hig/react/navigation";
 import { CopyButton } from "./copy-button";
 
 const installers = [
