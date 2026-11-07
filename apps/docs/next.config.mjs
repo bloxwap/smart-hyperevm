@@ -9,6 +9,7 @@ const config = {
   trailingSlash: true,
   basePath: process.env.NEXT_PUBLIC_BASE_PATH ?? "",
   images: { unoptimized: true },
+  transpilePackages: ["@bloxwap/hig"],
   turbopack: { root: path.resolve(import.meta.dirname, "../..") },
 };
 

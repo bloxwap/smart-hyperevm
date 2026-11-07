@@ -1,6 +1,6 @@
 "use client";
 
-import { IconButton } from "@bloxwap/hig-react/button";
+import { IconButton } from "@bloxwap/hig/react/button";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 

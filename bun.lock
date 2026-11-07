@@ -13,8 +13,7 @@
       "name": "@bloxwap/smart-hyperevm-docs",
       "dependencies": {
         "@bloxwap/font": "0.1.2",
-        "@bloxwap/hig-react": "0.1.0",
-        "@bloxwap/hig-tokens": "0.1.0",
+        "@bloxwap/hig": "0.2.0",
         "fumadocs-core": "16.17.7",
         "fumadocs-mdx": "15.4.8",
         "fumadocs-ui": "16.17.7",
@@ -75,13 +74,11 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.3", "", { "os": "win32", "cpu": "x64" }, "sha512-GhtOPphBWlnCepqpNk/w5eGN5oGRCzL20EbAkL1XCIpyboeVC9R642noyT43l8LSenGS4qz9IL8sKPfwY37V/Q=="],
 
+    "@bloxwap/chart": ["@bloxwap/chart@0.3.0", "", { "peerDependencies": { "react": ">=18" }, "optionalPeers": ["react"] }, "sha512-Iq+MVf2yhTQPBGEiZn6tmq35mDVptjujnQVaz202wtrQDxbqHRmPPDXnYseWYVoOw8kSkhL0ysy9ABgQvFYf9g=="],
+
     "@bloxwap/font": ["@bloxwap/font@0.1.2", "", { "peerDependencies": { "next": ">=15.0.0" }, "optionalPeers": ["next"] }, "sha512-3aWepyHUKhbRtpIZxYYN4ixY703YsKXcfgsRQR1BjiH8hkvahm/xfCkzFhb8fKoN6g1y6vTSb9FA5HCxJ9O0uQ=="],
 
-    "@bloxwap/hig-contracts": ["@bloxwap/hig-contracts@0.1.0", "", {}, "sha512-FshDRNoR8/qMySeQHzJE4VWN4X1W8XVoKH7Cx3bVD8e0Tw+eq9qU9KGVPzTbiHRa/Axp6xwNxrS81TPU90xzUA=="],
-
-    "@bloxwap/hig-react": ["@bloxwap/hig-react@0.1.0", "", { "dependencies": { "@bloxwap/hig-contracts": "0.1.0", "@bloxwap/hig-tokens": "0.1.0" }, "peerDependencies": { "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-popover": "^1.1.15", "@radix-ui/react-tooltip": "^1.2.8", "react": "^19.1.0", "react-dom": "^19.1.0", "vaul": "^1.1.2" }, "optionalPeers": ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-popover", "@radix-ui/react-tooltip", "vaul"] }, "sha512-0LdFe1i79CHWi6wjZnC+Khj+2wyQgH6RHhu1EGSL0eL1W+jQhEAXr7GmMS7eulJJeijlW6a1wbQgA7FkczvyZw=="],
-
-    "@bloxwap/hig-tokens": ["@bloxwap/hig-tokens@0.1.0", "", {}, "sha512-udpntFJd+V056S9CtBYQWFKY++me1h7fTTXfwq+ivyfDIveZrUW4tE10fghAtmDPz2m6jzOzMRCm/Cg5lw09GA=="],
+    "@bloxwap/hig": ["@bloxwap/hig@0.2.0", "", { "peerDependencies": { "@bloxwap/chart": "^0.3.0", "@bloxwap/haptic": "^0.2.0 || ^0.3.0", "@bloxwap/sfx": "^0.2.0", "@gorhom/bottom-sheet": "^5.2.14", "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-popover": "^1.1.15", "@radix-ui/react-tooltip": "^1.2.8", "@react-native-community/slider": "5.0.1 || 5.1.2 || 5.2.1", "expo-audio": "~1.1.1 || ~55.0.18 || ~58.0.10", "expo-haptics": "~15.0.7 || ~55.0.18 || ~58.0.7", "react": "^19.1.0", "react-dom": "^19.1.0", "react-native": "^0.81.5 || ^0.83.10 || ^0.88.0", "react-native-gesture-handler": "^2.28.0 || ^3.3.0", "react-native-reanimated": "^4.1.1", "react-native-safe-area-context": "~5.6.0 || ~5.10.1", "react-native-svg": "15.12.1 || 15.15.3 || 15.16.0", "react-native-worklets": "^0.5.1 || ^0.7.4 || ^0.13.0", "vaul": "^1.1.2" }, "optionalPeers": ["@bloxwap/haptic", "@bloxwap/sfx", "@gorhom/bottom-sheet", "@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-popover", "@radix-ui/react-tooltip", "@react-native-community/slider", "expo-audio", "expo-haptics", "react", "react-dom", "react-native", "react-native-gesture-handler", "react-native-reanimated", "react-native-safe-area-context", "react-native-svg", "react-native-worklets", "vaul"] }, "sha512-gQuAosZSDrEHioO3O4TN1Fj3bx0c+kA1pf3EcWNfpEf3yfYYysF9DYDV5mo1vX1ZgFQn8b7cHzn/ImCEkiQZMw=="],
 
     "@bloxwap/smart-hyperevm": ["@bloxwap/smart-hyperevm@workspace:packages/smart-hyperevm"],
 
