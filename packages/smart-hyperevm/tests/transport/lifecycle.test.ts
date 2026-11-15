@@ -218,6 +218,9 @@ describe("smartHyperevm transport lifecycle", () => {
       ).rejects.toBeInstanceOf(AllEndpointsFailedError);
       expect(await client.request({ method: "eth_chainId" }, { signal: tracked.signal })).toBe("0x3e7");
     }
+    // viem 2.57.20's withRetry attaches an abort listener and removes it in a
+    // microtask after the request settles.
+    await Promise.resolve();
     expect(tracked.active()).toBe(0);
   });
 
@@ -229,6 +232,7 @@ describe("smartHyperevm transport lifecycle", () => {
       await client.request({ method: "eth_blockNumber" }, { signal: tracked.signal });
     }
     expect(fetch.count("eth_blockNumber")).toBe(20);
+    await Promise.resolve();
     expect(tracked.active()).toBe(0);
   });
 });

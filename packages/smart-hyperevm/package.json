@@ -67,7 +67,7 @@
   "devDependencies": {
     "@types/bun": "1.4.3",
     "typescript": "5.9.3",
-    "viem": "2.57.7"
+    "viem": "2.57.20"
   },
   "publishConfig": {
     "access": "public"
