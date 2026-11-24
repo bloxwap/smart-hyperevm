@@ -674,6 +674,389 @@
           "ok": true
         }
       }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://hyperevm.rpc.sentio.xyz/",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085856,
+      "lag": 1,
+      "headAt": "2026-11-24T02:56:46.323Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 1022.9,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 144.7,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 91.3,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 167.8,
+          "ok": false
+        },
+        "eth_getLogs": {
+          "ms": 63.9,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 67.1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://hyperliquid-json-rpc.stakely.io/",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085850,
+      "lag": 7,
+      "headAt": "2026-11-24T02:56:46.240Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 576.4,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 507.7,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 490.9,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 449.5,
+          "ok": true
+        },
+        "eth_getLogs": {
+          "ms": 562.5,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 571.9,
+          "ok": true
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://hyperliquid.api.onfinality.io/evm/public",
+      "ok": false,
+      "chainIdOk": true,
+      "head": null,
+      "lag": null,
+      "methods": {
+        "eth_chainId": {
+          "ms": 1044.6,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 172.5,
+          "ok": false
+        },
+        "eth_call": {
+          "ms": 209.4,
+          "ok": false
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 96.8,
+          "ok": false
+        },
+        "eth_getLogs": {
+          "ms": 0,
+          "ok": false
+        },
+        "eth_getLogs_range": {
+          "ms": 0,
+          "ok": false
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://hyperliquid.drpc.org/",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085857,
+      "lag": 0,
+      "headAt": "2026-11-24T02:56:46.881Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 126.7,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 74.9,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 276.5,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 241.8,
+          "ok": true
+        },
+        "eth_getLogs": {
+          "ms": 320.3,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 49.9,
+          "ok": false
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://hyperliquid.rpc.blxrbdn.com/",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085857,
+      "lag": 1,
+      "headAt": "2026-11-24T02:56:47.344Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 489.4,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 141.2,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 143,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 134.8,
+          "ok": true
+        },
+        "eth_getLogs": {
+          "ms": 147.3,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 244.9,
+          "ok": true
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://lb.routeme.sh/rpc/evm/999",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085859,
+      "lag": 0,
+      "headAt": "2026-11-24T02:56:48.518Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 368.5,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 379.9,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 133.7,
+          "ok": false
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 146.5,
+          "ok": false
+        },
+        "eth_getLogs": {
+          "ms": 104.8,
+          "ok": false
+        },
+        "eth_getLogs_range": {
+          "ms": 477.5,
+          "ok": true
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://rpc.hyperlend.finance/",
+      "ok": false,
+      "chainIdOk": true,
+      "head": null,
+      "lag": null,
+      "methods": {
+        "eth_chainId": {
+          "ms": 740,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 212.7,
+          "ok": false
+        },
+        "eth_call": {
+          "ms": 8000.9,
+          "ok": false
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 799.3,
+          "ok": false
+        },
+        "eth_getLogs": {
+          "ms": 0,
+          "ok": false
+        },
+        "eth_getLogs_range": {
+          "ms": 0,
+          "ok": false
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://rpc.hyperliquid.xyz/evm",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085859,
+      "lag": 0,
+      "headAt": "2026-11-24T02:56:48.652Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 202.9,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 133.7,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 146.2,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 136.9,
+          "ok": true
+        },
+        "eth_getLogs": {
+          "ms": 134.5,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 161.3,
+          "ok": false
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://rpc.hypurrscan.io/",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085860,
+      "lag": 0,
+      "headAt": "2026-11-24T02:56:49.930Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 504.5,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 193.7,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 148.6,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 223.8,
+          "ok": true
+        },
+        "eth_getLogs": {
+          "ms": 266,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 298.6,
+          "ok": true
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://rpc.nodeflare.app/hl/public",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085860,
+      "lag": 0,
+      "headAt": "2026-11-24T02:56:49.951Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 356.4,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 214.2,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 234.6,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 209.5,
+          "ok": true
+        },
+        "eth_getLogs": {
+          "ms": 227,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 243.9,
+          "ok": true
+        }
+      }
+    },
+    {
+      "at": "2026-11-24T02:56:45.154Z",
+      "url": "https://rpc.purroofgroup.com/",
+      "ok": true,
+      "chainIdOk": true,
+      "head": 52085862,
+      "lag": 0,
+      "headAt": "2026-11-24T02:56:51.621Z",
+      "methods": {
+        "eth_chainId": {
+          "ms": 615.9,
+          "ok": true
+        },
+        "eth_blockNumber": {
+          "ms": 138.1,
+          "ok": true
+        },
+        "eth_call": {
+          "ms": 131.6,
+          "ok": true
+        },
+        "hypercore_l1BlockNumber": {
+          "ms": 133.1,
+          "ok": true
+        },
+        "eth_getLogs": {
+          "ms": 159.5,
+          "ok": true
+        },
+        "eth_getLogs_range": {
+          "ms": 300,
+          "ok": true
+        }
+      }
     }
   ]
 }
